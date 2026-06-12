@@ -1,0 +1,46 @@
+# systemd unit for the Discord leaderboard bot (24/7 gateway + slash + monthly job).
+#
+# Install (Linux):
+#   1. Edit paths below (WorkingDirectory, EnvironmentFile, User, ExecStart).
+#   2. sudo cp deploy/roflan-leaderboard-bot.service /etc/systemd/system/
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable --now roflan-leaderboard-bot
+#
+# Logs: journalctl -u roflan-leaderboard-bot -f
+
+[Unit]
+Description=Discord reaction leaderboard bot
+Documentation=file:///opt/roflan-analytics/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=roflan-bot
+Group=roflan-bot
+
+# Project root (contains bot/, .env, data/)
+WorkingDirectory=/opt/roflan-analytics
+
+# Secrets and config — same file used by CLI for manual runs
+EnvironmentFile=/opt/roflan-analytics/.env
+
+# Prefer absolute venv python; adjust if you use another layout
+ExecStart=/opt/roflan-analytics/.venv/bin/python -m bot.main
+
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+
+# Graceful shutdown (KeyboardInterrupt in bot.main)
+KillSignal=SIGINT
+
+# Hardening (optional; relax ReadWritePaths if DATABASE_PATH points elsewhere)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/roflan-analytics/data
+
+[Install]
+WantedBy=multi-user.target
