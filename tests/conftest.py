@@ -71,6 +71,7 @@ def env_settings(monkeypatch, tmp_path):
     monkeypatch.setenv("SCAN_CHANNEL_DELAY_SEC", "0")
     monkeypatch.setenv("SCAN_RETRY_MAX_ATTEMPTS", "2")
     monkeypatch.setenv("SCAN_STRICT_CHANNELS", "true")
+    monkeypatch.setenv("DAILY_SYNC_MESSAGE_DELAY_SEC", "0")
     monkeypatch.setenv("LEADERBOARD_EMOJIS", "EBALO")
     get_settings.cache_clear()
     yield get_settings()

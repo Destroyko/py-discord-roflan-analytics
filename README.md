@@ -9,14 +9,14 @@
 
 - Официальный **bot token** в `.env` (`DISCORD_BOT_TOKEN`) — не коммитить файл `.env`.
 - CLI: одноразовый прогон без постоянного gateway (`python -m bot.cli run`).
-- Бот 24/7: slash `/recalculate_leaderboard`, `/show_leaderboard` (TOP из БД), ежемесячный автозапуск 1-го числа 00:05 (МСК по умолчанию).
+- Бот 24/7: slash `/show_leaderboard` (TOP из БД), `/recalculate_leaderboard` (ручной скан; только модераторские роли), ежемесячный автозапуск 1-го числа в 10:00 (МСК по умолчанию). Альтернатива без gateway — CLI (`bot.cli run`).
 
 ## Требования
 
 - Python 3.11+
 - Application в [Discord Developer Portal](https://discord.com/developers/applications)
 - Scopes при инвайте: `bot`, `applications.commands`
-- Права: Read Message History, Send Messages, Use Application Commands
+- Права бота (без Administrator): View Channels, Read Message History, Send Messages, Embed Links; для перевыдачи роли — Manage Roles и роль бота **выше** «Рофлер»
 
 ## Установка
 
@@ -32,7 +32,6 @@ copy .env.example .env
 - `DISCORD_BOT_TOKEN` — Bot → Token в Developer Portal
 - `GUILD_ID`, `STATS_CHANNEL_IDS`
 - `LEADERBOARD_CHANNEL_ID` — канал для embed (для бота)
-- `MANUAL_RECALC_ROLE_ID` — опционально, кто может вызывать slash (иначе только Administrator)
 
 ## CLI (скан без gateway)
 
@@ -60,13 +59,14 @@ python -m bot.cli run --year 2026 --month 3 --resume
 python -m bot.main
 ```
 
-- `/recalculate_leaderboard` — скан Discord и обновление БД (`year`, `month`, `post_results`, `assign_roles`, `resume`)
-- `/show_leaderboard` — TOP **5** за месяц по **каналу** (`year`, `month`, `channel`) из SQLite, без скана
-- Прогресс скана обновляется прямо в ephemeral-ответе команды
-- 1-го числа в 00:05 (`LEADERBOARD_TIMEZONE`) — пересчёт **предыдущего** месяца, embed в `LEADERBOARD_CHANNEL_ID`, перевыдача роли **Рофлер** (TOP-3 «дурка» + TOP-2 «рофлинки»)
+- **Ежедневно** (`DAILY_SYNC_HOUR`, по умолчанию 04:00 МСК) — инкрементальное обновление **текущего** месяца: по известным `message_id` подтягиваются реакции, новые посты дописываются, удалённые на сервере — убираются из БД
+- `/show_leaderboard` — TOP **5** за месяц по **каналу** (`year`, `month`, `channel`) из SQLite, без скана (ответ только вам)
+- `/recalculate_leaderboard` — полный скан и пересчёт (`year`, `month`, `post_results`, `assign_roles`, `resume`); доступ: Administrator или роли из `MANUAL_RECALC_ROLE_IDS`; весь прогресс и результат — **только вам** (ephemeral), embed/роли — по флагам в публичные каналы
+- 1-го числа в `LEADERBOARD_MONTHLY_RUN_HOUR`:`LEADERBOARD_MONTHLY_RUN_MINUTE` (`LEADERBOARD_TIMEZONE`, по умолчанию **10:00** МСК) — пересчёт **предыдущего** месяца, embed в `LEADERBOARD_CHANNEL_ID`, перевыдача роли **Рофлер** (TOP-3 «дурка» + TOP-2 «рофлинки»)
 - Успех перевыдачи → текст в `ROLE_NOTIFY_CHANNEL_ID` (кликабельные роль и пользователи)
 - Ошибка перевыдачи → текст в `ROLE_ERROR_CHANNEL_ID`
 - Если месячный **скан** не завершился, бот пишет в `LEADERBOARD_CHANNEL_ID`
+- При старте в лог/journal пишется **permission audit**: какие права на сервере и в каналах есть и чего не хватает (без Administrator — только нужные флаги)
 
 **Прод на Linux:** systemd unit и чеклист миграции с cron → сервис — [docs/DEPLOY.md](docs/DEPLOY.md).  
 CLI оставьте для отладки; **не** ставьте cron на monthly job, если бот уже запущен как сервис.
@@ -100,7 +100,6 @@ python -m bot.cli channels-top --year 2026 --month 5
 | `IGNORE_CHANNEL_IDS` | нет | Исключения из списка каналов |
 | `EXCLUDED_USER_IDS` | нет | ID пользователей, не попадающих в статистику и TOP |
 | `LEADERBOARD_CHANNEL_ID` | нет | Канал для embed после job бота |
-| `MANUAL_RECALC_ROLE_ID` | нет | Роль для slash (кроме Administrator) |
 | `ROLE_ROFLER_ID` | для ролей | ID роли «Рофлер» (снимается у всех, выдаётся победителям) |
 | `ROLE_NOTIFY_CHANNEL_ID` | для ролей | Канал успешной перевыдачи |
 | `ROLE_ERROR_CHANNEL_ID` | для ролей | Канал ошибок перевыдачи |
@@ -109,6 +108,12 @@ python -m bot.cli channels-top --year 2026 --month 5
 | `ROLE_ROFLINKICHI_CHANNEL_ID` | для ролей | Канал TOP-2 (Рофлинкичи), из `STATS_CHANNEL_IDS` |
 | `ROLE_ROFLINKICHI_TOP_N` | нет | Размер TOP, по умолчанию `2` |
 | `LEADERBOARD_TIMEZONE` | нет | IANA TZ, по умолчанию `Europe/Moscow` |
+| `LEADERBOARD_MONTHLY_RUN_HOUR` | нет | Час monthly job (1-е число), по умолчанию `10` |
+| `LEADERBOARD_MONTHLY_RUN_MINUTE` | нет | Минута monthly job, по умолчанию `0` |
+| `DAILY_SYNC_ENABLED` | нет | Ежедневный инкрементальный sync текущего месяца, по умолчанию `true` |
+| `DAILY_SYNC_HOUR` / `DAILY_SYNC_MINUTE` | нет | Время daily sync, по умолчанию `04:00` |
+| `DAILY_SYNC_FETCH_BATCH_SIZE` | нет | Пауза после каждых N `fetch_message`, по умолчанию `25` |
+| `DAILY_SYNC_MESSAGE_DELAY_SEC` | нет | Длительность паузы, по умолчанию `0.05` |
 | `LEADERBOARD_EMOJIS` | нет | Имена эмодзи через запятую (сумма на сообщение), напр. `EBALO,ROFL`; можно `LEADERBOARD_EMOJI` для одного |
 | `DATABASE_PATH` | нет | SQLite, по умолчанию `./data/leaderboard.db` |
 | `LEADERBOARD_TOP_N` | нет | Строк в TOP в терминале/embed, по умолчанию `10` |
@@ -127,9 +132,9 @@ python -m bot.cli channels-top --year 2026 --month 5
 |------|----------------|------------|
 | Обрыв WebSocket / временный 429/5xx | `discord.py` сам переподключает gateway; скан каналов повторяет запрос (`SCAN_RETRY_MAX_ATTEMPTS`, экспоненциальный backoff) | Ничего, восстановление автоматическое |
 | Канал недоступен (403/404) | `SCAN_STRICT_CHANNELS=true` → канал `failed`, коммита нет; `false` → канал `skipped` | Проверить права бота, затем `--resume` |
-| Падение процесса / перезагрузка сервера mid-scan | На диске остаётся checkpoint (`SCAN_CHECKPOINT_DIR`) + строки в `messages_staging`; прод-таблица `messages` не тронута | `python -m bot.cli run ... --resume` или slash с `resume: true` — завершённые каналы пропускаются |
-| Месячный job упал | Бот остаётся online (`tasks.loop` не гаснет), пишет уведомление в `LEADERBOARD_CHANNEL_ID`, БД без изменений | Запустить пересчёт вручную с `resume` |
-| Перевыдача роли не удалась | Сообщение в `ROLE_ERROR_CHANNEL_ID`, скан/БД уже могли успеть | Исправить права (роль бота выше «Рофлер», Manage Roles), повторить с `assign_roles: true` |
+| Падение процесса / перезагрузка сервера mid-scan | На диске остаётся checkpoint (`SCAN_CHECKPOINT_DIR`) + строки в `messages_staging`; прод-таблица `messages` не тронута | `python -m bot.cli run ... --resume` — завершённые каналы пропускаются |
+| Месячный job упал | Бот остаётся online (`tasks.loop` не гаснет), пишет уведомление в `LEADERBOARD_CHANNEL_ID`, БД без изменений | `bot.cli run … --resume` (или дождаться следующего месяца) |
+| Перевыдача роли не удалась | Сообщение в `ROLE_ERROR_CHANNEL_ID`, скан/БД уже могли успеть | Исправить права (роль бота выше «Рофлер», Manage Roles), пересчёт через CLI |
 
 Бот **сам не догоняет** прерванный скан после рестарта процесса — нужен ручной `--resume`. Коммит в прод атомарный (`BEGIN IMMEDIATE`): при ошибке всё откатывается, частичный скан никогда не перезаписывает данные.
 

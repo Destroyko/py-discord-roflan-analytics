@@ -20,6 +20,12 @@ DEFAULT_SCAN_RETRY_MAX_ATTEMPTS = 5
 DEFAULT_SCAN_CHANNEL_DELAY_SEC = 0.5
 DEFAULT_ROLE_DURKICHI_TOP_N = 3
 DEFAULT_ROLE_ROFLINKICHI_TOP_N = 2
+DEFAULT_MONTHLY_RUN_HOUR = 10
+DEFAULT_MONTHLY_RUN_MINUTE = 0
+DEFAULT_DAILY_SYNC_HOUR = 4
+DEFAULT_DAILY_SYNC_MINUTE = 0
+DEFAULT_DAILY_SYNC_MESSAGE_DELAY_SEC = 0.05
+DEFAULT_DAILY_SYNC_FETCH_BATCH_SIZE = 25
 
 
 @dataclass(frozen=True)
@@ -30,13 +36,20 @@ class Settings:
     guild_id: int
     stats_channel_ids: list[int]
     timezone: str = DEFAULT_TIMEZONE
+    monthly_run_hour: int = DEFAULT_MONTHLY_RUN_HOUR
+    monthly_run_minute: int = DEFAULT_MONTHLY_RUN_MINUTE
+    daily_sync_enabled: bool = True
+    daily_sync_hour: int = DEFAULT_DAILY_SYNC_HOUR
+    daily_sync_minute: int = DEFAULT_DAILY_SYNC_MINUTE
+    daily_sync_message_delay_sec: float = DEFAULT_DAILY_SYNC_MESSAGE_DELAY_SEC
+    daily_sync_fetch_batch_size: int = DEFAULT_DAILY_SYNC_FETCH_BATCH_SIZE
     emoji_names: frozenset[str] = field(
         default_factory=lambda: frozenset({DEFAULT_EMOJI})
     )
     database_path: Path = field(default_factory=lambda: Path(DEFAULT_DATABASE_PATH))
     top_n: int = DEFAULT_TOP_N
     leaderboard_channel_id: int | None = None
-    manual_recalc_role_id: int | None = None
+    manual_recalc_role_ids: frozenset[int] = field(default_factory=frozenset)
     scan_batch_size: int = DEFAULT_SCAN_BATCH_SIZE
     scan_progress_every: int = DEFAULT_SCAN_PROGRESS_EVERY
     scan_max_messages_per_channel: int = 0
@@ -106,6 +119,15 @@ def _parse_emoji_names() -> frozenset[str]:
     return frozenset(names)
 
 
+def _parse_manual_recalc_role_ids() -> frozenset[int]:
+    """Roles allowed to run ``/recalculate_leaderboard`` (plus Administrator)."""
+    ids = set(_parse_id_list(os.getenv("MANUAL_RECALC_ROLE_IDS")))
+    legacy = _parse_optional_int(os.getenv("MANUAL_RECALC_ROLE_ID"))
+    if legacy is not None:
+        ids.add(legacy)
+    return frozenset(ids)
+
+
 def _parse_id_list(raw: str | None) -> list[int]:
     if not raw:
         return []
@@ -160,6 +182,49 @@ def get_settings() -> Settings:
 
     emoji_names = _parse_emoji_names()
     timezone = (os.getenv("LEADERBOARD_TIMEZONE") or DEFAULT_TIMEZONE).strip()
+    monthly_run_hour = int(
+        (
+            os.getenv("LEADERBOARD_MONTHLY_RUN_HOUR")
+            or str(DEFAULT_MONTHLY_RUN_HOUR)
+        ).strip()
+    )
+    if not 0 <= monthly_run_hour <= 23:
+        raise ValueError("LEADERBOARD_MONTHLY_RUN_HOUR must be between 0 and 23")
+    monthly_run_minute = int(
+        (
+            os.getenv("LEADERBOARD_MONTHLY_RUN_MINUTE")
+            or str(DEFAULT_MONTHLY_RUN_MINUTE)
+        ).strip()
+    )
+    if not 0 <= monthly_run_minute <= 59:
+        raise ValueError("LEADERBOARD_MONTHLY_RUN_MINUTE must be between 0 and 59")
+    daily_sync_enabled = _parse_bool(os.getenv("DAILY_SYNC_ENABLED"), True)
+    daily_sync_hour = int(
+        (os.getenv("DAILY_SYNC_HOUR") or str(DEFAULT_DAILY_SYNC_HOUR)).strip()
+    )
+    if not 0 <= daily_sync_hour <= 23:
+        raise ValueError("DAILY_SYNC_HOUR must be between 0 and 23")
+    daily_sync_minute = int(
+        (os.getenv("DAILY_SYNC_MINUTE") or str(DEFAULT_DAILY_SYNC_MINUTE)).strip()
+    )
+    if not 0 <= daily_sync_minute <= 59:
+        raise ValueError("DAILY_SYNC_MINUTE must be between 0 and 59")
+    daily_sync_message_delay_sec = float(
+        (
+            os.getenv("DAILY_SYNC_MESSAGE_DELAY_SEC")
+            or str(DEFAULT_DAILY_SYNC_MESSAGE_DELAY_SEC)
+        ).strip()
+    )
+    if daily_sync_message_delay_sec < 0:
+        raise ValueError("DAILY_SYNC_MESSAGE_DELAY_SEC must be >= 0")
+    daily_sync_fetch_batch_size = int(
+        (
+            os.getenv("DAILY_SYNC_FETCH_BATCH_SIZE")
+            or str(DEFAULT_DAILY_SYNC_FETCH_BATCH_SIZE)
+        ).strip()
+    )
+    if daily_sync_fetch_batch_size < 1:
+        raise ValueError("DAILY_SYNC_FETCH_BATCH_SIZE must be at least 1")
     database_path = Path((os.getenv("DATABASE_PATH") or DEFAULT_DATABASE_PATH).strip())
     top_n = int((os.getenv("LEADERBOARD_TOP_N") or str(DEFAULT_TOP_N)).strip())
     if top_n < 1:
@@ -214,15 +279,20 @@ def get_settings() -> Settings:
         guild_id=guild_id,
         stats_channel_ids=stats_ids,
         timezone=timezone,
+        monthly_run_hour=monthly_run_hour,
+        monthly_run_minute=monthly_run_minute,
+        daily_sync_enabled=daily_sync_enabled,
+        daily_sync_hour=daily_sync_hour,
+        daily_sync_minute=daily_sync_minute,
+        daily_sync_message_delay_sec=daily_sync_message_delay_sec,
+        daily_sync_fetch_batch_size=daily_sync_fetch_batch_size,
         emoji_names=emoji_names,
         database_path=database_path,
         top_n=top_n,
         leaderboard_channel_id=_parse_optional_int(
             os.getenv("LEADERBOARD_CHANNEL_ID")
         ),
-        manual_recalc_role_id=_parse_optional_int(
-            os.getenv("MANUAL_RECALC_ROLE_ID")
-        ),
+        manual_recalc_role_ids=_parse_manual_recalc_role_ids(),
         scan_batch_size=scan_batch_size,
         scan_progress_every=scan_progress_every,
         scan_max_messages_per_channel=scan_max_messages,

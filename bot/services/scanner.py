@@ -82,6 +82,36 @@ def _reaction_emoji_name(reaction: discord.Reaction) -> str | None:
     return name
 
 
+def message_row_if_tracked(
+    message: discord.Message,
+    *,
+    guild_id_str: str,
+    emoji_names: frozenset[str],
+    excluded_user_ids: frozenset[str],
+    scanned_at: str,
+) -> MessageRow | None:
+    """Build a ``MessageRow`` when the message counts for the leaderboard."""
+    if message.author.bot or message.is_system():
+        return None
+    if str(message.author.id) in excluded_user_ids:
+        return None
+    reaction_count = count_emoji_reactions(message.reactions, emoji_names)
+    if reaction_count == 0:
+        return None
+    channel_id = getattr(message.channel, "id", None)
+    if channel_id is None:
+        return None
+    return MessageRow(
+        message_id=str(message.id),
+        author_id=str(message.author.id),
+        channel_id=str(channel_id),
+        guild_id=guild_id_str,
+        created_at=to_db_timestamp(message.created_at),
+        reaction_count=reaction_count,
+        last_scanned_at=scanned_at,
+    )
+
+
 def count_emoji_reactions(
     reactions: list[discord.Reaction], emoji_names: frozenset[str]
 ) -> int:
@@ -263,21 +293,17 @@ async def _scan_single_channel(
         if str(message.author.id) in settings.excluded_user_ids:
             continue
 
-        reaction_count = count_emoji_reactions(message.reactions, emoji_names)
-        if reaction_count == 0:
+        row = message_row_if_tracked(
+            message,
+            guild_id_str=guild_id_str,
+            emoji_names=emoji_names,
+            excluded_user_ids=settings.excluded_user_ids,
+            scanned_at=scanned_at,
+        )
+        if row is None:
             continue
 
-        batch.append(
-            MessageRow(
-                message_id=str(message.id),
-                author_id=str(message.author.id),
-                channel_id=str(channel.id),
-                guild_id=guild_id_str,
-                created_at=to_db_timestamp(message.created_at),
-                reaction_count=reaction_count,
-                last_scanned_at=scanned_at,
-            )
-        )
+        batch.append(row)
         matched += 1
 
         if len(batch) >= settings.scan_batch_size:

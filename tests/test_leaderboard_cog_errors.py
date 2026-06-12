@@ -2,7 +2,7 @@
 
 A crash in the monthly job must not propagate out of the ``tasks.loop`` callback
 (which would otherwise stop the loop); instead it notifies the leaderboard
-channel. The slash command must tell the invoker how to resume.
+channel.
 
 The cog module evaluates ``get_tz()`` at import time, so it is imported lazily
 via fixtures that depend on ``env_settings`` (which populates the environment).
@@ -87,22 +87,58 @@ async def test_monthly_skips_when_not_first_of_month(cogmod, cog, monkeypatch):
     run.assert_not_awaited()
 
 
+def _slash_interaction():
+    interaction = MagicMock()
+    interaction.response.send_message = AsyncMock()
+    interaction.response.defer = AsyncMock()
+    interaction.edit_original_response = AsyncMock()
+    interaction.followup.send = AsyncMock()
+    return interaction
+
+
 async def test_recalculate_reports_resume_hint_on_scan_failed(cogmod, cog, monkeypatch):
-    monkeypatch.setattr(cogmod, "_can_recalculate", lambda _interaction: True)
+    interaction = _slash_interaction()
+    monkeypatch.setattr(cogmod, "_can_recalculate", lambda _i: True)
     monkeypatch.setattr(
         cogmod, "run_pipeline",
         AsyncMock(side_effect=ScanFailedError(_scan_failed_stats())),
     )
+    monkeypatch.setattr(cogmod, "BotChannelReader", MagicMock())
 
-    interaction = MagicMock()
-    interaction.response.defer = AsyncMock()
-    interaction.edit_original_response = AsyncMock()
-    interaction.followup.send = AsyncMock()
+    await cog.recalculate_leaderboard.callback(cog, interaction, 2026, 3)
 
-    await cogmod.LeaderboardCog.recalculate_leaderboard.callback(
-        cog, interaction, 2026, 1
-    )
-
-    interaction.edit_original_response.assert_awaited()
-    content = interaction.edit_original_response.call_args.kwargs["content"]
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+    interaction.edit_original_response.assert_awaited_once()
+    call = interaction.edit_original_response.await_args
+    content = call.kwargs.get("content") or call.args[0]
     assert "resume" in content.lower()
+
+
+async def test_recalculate_denies_without_role(cogmod, cog, monkeypatch):
+    interaction = _slash_interaction()
+    monkeypatch.setattr(cogmod, "_can_recalculate", lambda _i: False)
+
+    await cog.recalculate_leaderboard.callback(cog, interaction, 2026, 3)
+
+    interaction.response.send_message.assert_awaited_once()
+    assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+    interaction.response.defer.assert_not_awaited()
+
+
+def test_can_recalculate_with_matching_role(cogmod, make_settings, monkeypatch):
+    role = MagicMock()
+    role.id = 42
+    member = MagicMock(spec=["roles", "guild_permissions"])
+    member.guild_permissions.administrator = False
+    member.roles = [role]
+    interaction = MagicMock(user=member)
+
+    monkeypatch.setattr(
+        cogmod,
+        "get_settings",
+        lambda: make_settings(manual_recalc_role_ids=frozenset({42})),
+    )
+    monkeypatch.setattr(cogmod.discord, "Member", type(member))
+
+    assert cogmod._can_recalculate(interaction) is True
+

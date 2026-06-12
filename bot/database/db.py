@@ -86,6 +86,45 @@ class Database:
         logger.info("Purged %s rows for guild %s in period.", deleted, guild_id)
         return deleted
 
+    async def list_message_ids_for_channel(
+        self,
+        guild_id: str,
+        channel_id: str,
+        after: str,
+        before: str,
+    ) -> list[str]:
+        """Return message IDs already stored for one channel in the period."""
+        cursor = await self.connection.execute(
+            """
+            SELECT message_id FROM messages
+            WHERE guild_id = ? AND channel_id = ?
+              AND created_at >= ? AND created_at < ?
+            """,
+            (guild_id, channel_id, after, before),
+        )
+        rows = await cursor.fetchall()
+        await cursor.close()
+        return [str(message_id) for (message_id,) in rows]
+
+    async def delete_messages_by_ids(self, message_ids: Sequence[str]) -> int:
+        """Delete rows by primary key; no-op when ``message_ids`` is empty."""
+        if not message_ids:
+            return 0
+        deleted = 0
+        chunk_size = 500
+        ids = list(message_ids)
+        for offset in range(0, len(ids), chunk_size):
+            chunk = ids[offset : offset + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            cursor = await self.connection.execute(
+                f"DELETE FROM messages WHERE message_id IN ({placeholders})",
+                chunk,
+            )
+            deleted += cursor.rowcount
+            await cursor.close()
+        await self.connection.commit()
+        return deleted
+
     async def upsert_messages(self, rows: Sequence[MessageRow]) -> None:
         if not rows:
             return

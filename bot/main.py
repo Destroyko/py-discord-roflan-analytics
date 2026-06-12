@@ -9,6 +9,7 @@ from discord.ext import commands
 
 from bot.config import get_settings
 from bot.database.db import Database
+from bot.services.guild_audit import audit_guild_permissions
 from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -16,6 +17,10 @@ logger = get_logger(__name__)
 
 class LeaderboardBot(commands.Bot):
     """Bot with DB init and slash sync on startup."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._permissions_audited = False
 
     async def setup_hook(self) -> None:
         settings = get_settings()
@@ -30,6 +35,10 @@ class LeaderboardBot(commands.Bot):
             logger.info("Logged in as %s (%s).", self.user, self.user.id)
         else:
             logger.info("Bot is ready.")
+
+        if not self._permissions_audited:
+            self._permissions_audited = True
+            await audit_guild_permissions(self, get_settings())
 
 
 def main() -> int:

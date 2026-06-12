@@ -7,7 +7,7 @@ and the database agree on the half-open interval ``[after, before)``.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from bot.config import get_settings
@@ -51,6 +51,19 @@ def month_bounds_utc(year: int, month: int) -> tuple[datetime, datetime]:
     return start.astimezone(timezone.utc), end.astimezone(timezone.utc)
 
 
+def current_calendar_month(
+    now: datetime | None = None,
+) -> tuple[int, int]:
+    """Return ``(year, month)`` for the calendar month containing ``now``."""
+    if now is None:
+        now = datetime.now(tz=get_tz())
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=get_tz())
+    else:
+        now = now.astimezone(get_tz())
+    return now.year, now.month
+
+
 def previous_calendar_month(
     now: datetime | None = None,
 ) -> tuple[int, int]:
@@ -67,14 +80,65 @@ def previous_calendar_month(
     return last_of_previous.year, last_of_previous.month
 
 
+def monthly_run_time_of_day() -> time:
+    """Local time-of-day for the monthly job (from settings + timezone)."""
+    settings = get_settings()
+    return time(
+        hour=settings.monthly_run_hour,
+        minute=settings.monthly_run_minute,
+        tzinfo=get_tz(),
+    )
+
+
+def daily_sync_time_of_day() -> time:
+    """Local time-of-day for the daily incremental sync job."""
+    settings = get_settings()
+    return time(
+        hour=settings.daily_sync_hour,
+        minute=settings.daily_sync_minute,
+        tzinfo=get_tz(),
+    )
+
+
+def next_daily_sync_at(
+    *,
+    hour: int | None = None,
+    minute: int | None = None,
+    now: datetime | None = None,
+) -> datetime:
+    """Next daily sync at configured local time (today or tomorrow)."""
+    settings = get_settings()
+    if hour is None:
+        hour = settings.daily_sync_hour
+    if minute is None:
+        minute = settings.daily_sync_minute
+    tz = get_tz()
+    if now is None:
+        now = datetime.now(tz=tz)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=tz)
+    else:
+        now = now.astimezone(tz)
+
+    candidate = datetime(now.year, now.month, now.day, hour, minute, tzinfo=tz)
+    if now >= candidate:
+        candidate += timedelta(days=1)
+    return candidate
+
+
 def next_monthly_run_at(
     *,
     day: int = 1,
-    hour: int = 0,
-    minute: int = 5,
+    hour: int | None = None,
+    minute: int | None = None,
     now: datetime | None = None,
 ) -> datetime:
-    """Next scheduled run at ``day`` 00:05 (configurable) in leaderboard timezone."""
+    """Next scheduled run on ``day`` at configured local time in leaderboard TZ."""
+    settings = get_settings()
+    if hour is None:
+        hour = settings.monthly_run_hour
+    if minute is None:
+        minute = settings.monthly_run_minute
     tz = get_tz()
     if now is None:
         now = datetime.now(tz=tz)

@@ -38,6 +38,7 @@ class FakeMessage:
         message_id: int,
         author_id: int,
         *,
+        channel_id: int | None = None,
         reactions: list[FakeReaction] | None = None,
         created_at: datetime | None = None,
         bot: bool = False,
@@ -48,6 +49,7 @@ class FakeMessage:
         self.reactions = reactions or []
         self.created_at = created_at or datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
         self._system = system
+        self.channel = SimpleNamespace(id=channel_id or 0)
 
     def is_system(self) -> bool:
         return self._system
@@ -73,9 +75,23 @@ class FakeChannel:
         self.id = channel_id
         self.name = name
         self._messages = messages or []
+        for message in self._messages:
+            message.channel = SimpleNamespace(id=channel_id)
+        self._by_id = {message.id: message for message in self._messages}
         self._raise_exc = raise_exc
         self._raise_after = raise_after
         self.history_calls = 0
+        self.fetch_calls: list[int] = []
+
+    async def fetch_message(self, message_id: int) -> FakeMessage:
+        self.fetch_calls.append(message_id)
+        message = self._by_id.get(message_id)
+        if message is None:
+            raise discord.NotFound(
+                SimpleNamespace(status=404, reason="Unknown Message"),
+                "Unknown Message",
+            )
+        return message
 
     async def history(self, *, limit=None, after=None, before=None, oldest_first=True):
         self.history_calls += 1
