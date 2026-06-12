@@ -1,0 +1,12 @@
+.env
+data/
+reports/
+user_*.xlsx
+*.db
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.vscode/
+.idea/
