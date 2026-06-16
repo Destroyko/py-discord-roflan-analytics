@@ -32,6 +32,7 @@ def _settings(tmp_path) -> Settings:
         role_durkichi_top_n=3,
         role_roflinkichi_channel_id=222,
         role_roflinkichi_top_n=2,
+        role_reassign_enabled=True,
         database_path=tmp_path / "db.sqlite",
     )
 
@@ -105,6 +106,7 @@ def test_validate_role_settings_rejects_unknown_channel(tmp_path):
         discord_bot_token="t",
         guild_id=1000,
         stats_channel_ids=[111],
+        role_reassign_enabled=True,
         role_rofler_id=1,
         role_notify_channel_id=2,
         role_error_channel_id=3,

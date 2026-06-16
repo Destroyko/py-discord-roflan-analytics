@@ -68,9 +68,14 @@ class Settings:
     role_durkichi_top_n: int = DEFAULT_ROLE_DURKICHI_TOP_N
     role_roflinkichi_channel_id: int | None = None
     role_roflinkichi_top_n: int = DEFAULT_ROLE_ROFLINKICHI_TOP_N
+    role_reassign_enabled: bool = False
 
     def validate_role_settings(self) -> None:
         """Ensure role reassignment env is complete and consistent."""
+        if not self.role_reassign_enabled:
+            raise ValueError(
+                "Role reassignment is disabled (ROLE_REASSIGN_ENABLED=false)."
+            )
         missing = [
             name
             for name, value in (
@@ -273,6 +278,7 @@ def get_settings() -> Settings:
             or str(DEFAULT_ROLE_ROFLINKICHI_TOP_N)
         ).strip()
     )
+    role_reassign_enabled = _parse_bool(os.getenv("ROLE_REASSIGN_ENABLED"), False)
 
     return Settings(
         discord_bot_token=token,
@@ -321,4 +327,5 @@ def get_settings() -> Settings:
             os.getenv("ROLE_ROFLINKICHI_CHANNEL_ID")
         ),
         role_roflinkichi_top_n=role_roflinkichi_top_n,
+        role_reassign_enabled=role_reassign_enabled,
     )

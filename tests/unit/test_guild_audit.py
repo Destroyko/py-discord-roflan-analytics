@@ -43,6 +43,7 @@ def test_role_features_configured_incomplete():
 
 def test_role_features_configured_complete():
     s = _settings(
+        role_reassign_enabled=True,
         role_rofler_id=9001,
         role_notify_channel_id=8001,
         role_error_channel_id=8002,

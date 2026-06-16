@@ -46,7 +46,9 @@ class GuildAuditReport:
 
 
 def role_features_configured(settings: Settings) -> bool:
-    """True when monthly/slash role reassignment env is fully set."""
+    """True when role reassignment is enabled and env is fully set."""
+    if not settings.role_reassign_enabled:
+        return False
     try:
         settings.validate_role_settings()
     except ValueError:

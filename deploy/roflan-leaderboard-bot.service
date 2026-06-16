@@ -10,7 +10,7 @@
 
 [Unit]
 Description=Discord reaction leaderboard bot
-Documentation=file:///opt/roflan-analytics/README.md
+Documentation=file:///var/www/py-discord-roflan-analytics/README.md
 After=network-online.target
 Wants=network-online.target
 
@@ -20,13 +20,13 @@ User=roflan-bot
 Group=roflan-bot
 
 # Project root (contains bot/, .env, data/)
-WorkingDirectory=/opt/roflan-analytics
+WorkingDirectory=/var/www/py-discord-roflan-analytics
 
 # Secrets and config — same file used by CLI for manual runs
-EnvironmentFile=/opt/roflan-analytics/.env
+EnvironmentFile=/var/www/py-discord-roflan-analytics/env
 
 # Prefer absolute venv python; adjust if you use another layout
-ExecStart=/opt/roflan-analytics/.venv/bin/python -m bot.main
+ExecStart=/var/www/py-discord-roflan-analytics/.venv/bin/python -m bot.main
 
 Restart=always
 RestartSec=10
@@ -40,7 +40,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/roflan-analytics/data
+ReadWritePaths=/var/www/py-discord-roflan-analytics/data
 
 [Install]
 WantedBy=multi-user.target

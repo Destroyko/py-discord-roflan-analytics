@@ -16,6 +16,7 @@ from bot.services.role_service import (
 @pytest.fixture
 def role_env_settings(env_settings, monkeypatch):
     """env_settings plus ROLE_* variables required by validate_role_settings."""
+    monkeypatch.setenv("ROLE_REASSIGN_ENABLED", "true")
     monkeypatch.setenv("ROLE_ROFLER_ID", "9001")
     monkeypatch.setenv("ROLE_NOTIFY_CHANNEL_ID", "8001")
     monkeypatch.setenv("ROLE_ERROR_CHANNEL_ID", "8002")

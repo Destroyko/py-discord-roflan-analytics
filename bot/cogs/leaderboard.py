@@ -235,6 +235,20 @@ class LeaderboardCog(commands.Cog):
 
 
 
+        if assign_roles and not get_settings().role_reassign_enabled:
+
+            await interaction.response.send_message(
+
+                "Role reassignment is disabled (`ROLE_REASSIGN_ENABLED=false`).",
+
+                ephemeral=True,
+
+            )
+
+            return
+
+
+
         await interaction.response.defer(ephemeral=True)
 
 
@@ -539,6 +553,8 @@ class LeaderboardCog(commands.Cog):
 
         logger.info("Monthly job: recalculating %s-%02d", year, month)
 
+        settings = get_settings()
+
         reader = BotChannelReader(self.bot)
 
         try:
@@ -553,7 +569,7 @@ class LeaderboardCog(commands.Cog):
 
                 post_embed=True,
 
-                assign_roles=True,
+                assign_roles=settings.role_reassign_enabled,
 
                 bot=self.bot,
 

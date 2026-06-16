@@ -100,12 +100,13 @@ python -m bot.cli channels-top --year 2026 --month 5
 | `IGNORE_CHANNEL_IDS` | нет | Исключения из списка каналов |
 | `EXCLUDED_USER_IDS` | нет | ID пользователей, не попадающих в статистику и TOP |
 | `LEADERBOARD_CHANNEL_ID` | нет | Канал для embed после job бота |
-| `ROLE_ROFLER_ID` | для ролей | ID роли «Рофлер» (снимается у всех, выдаётся победителям) |
-| `ROLE_NOTIFY_CHANNEL_ID` | для ролей | Канал успешной перевыдачи |
-| `ROLE_ERROR_CHANNEL_ID` | для ролей | Канал ошибок перевыдачи |
-| `ROLE_DURKICHI_CHANNEL_ID` | для ролей | Канал TOP-3 (Дуркичи), из `STATS_CHANNEL_IDS` |
+| `ROLE_REASSIGN_ENABLED` | нет | `false` (по умолчанию): только статистика/embed; `true` — перевыдача роли (нужен **Server Members Intent** в Discord Portal) |
+| `ROLE_ROFLER_ID` | при `ROLE_REASSIGN_ENABLED=true` | ID роли «Рофлер» |
+| `ROLE_NOTIFY_CHANNEL_ID` | при `ROLE_REASSIGN_ENABLED=true` | Канал успешной перевыдачи |
+| `ROLE_ERROR_CHANNEL_ID` | при `ROLE_REASSIGN_ENABLED=true` | Канал ошибок перевыдачи |
+| `ROLE_DURKICHI_CHANNEL_ID` | при `ROLE_REASSIGN_ENABLED=true` | Канал TOP-3 (Дуркичи), из `STATS_CHANNEL_IDS` |
 | `ROLE_DURKICHI_TOP_N` | нет | Размер TOP, по умолчанию `3` |
-| `ROLE_ROFLINKICHI_CHANNEL_ID` | для ролей | Канал TOP-2 (Рофлинкичи), из `STATS_CHANNEL_IDS` |
+| `ROLE_ROFLINKICHI_CHANNEL_ID` | при `ROLE_REASSIGN_ENABLED=true` | Канал TOP-2 (Рофлинкичи), из `STATS_CHANNEL_IDS` |
 | `ROLE_ROFLINKICHI_TOP_N` | нет | Размер TOP, по умолчанию `2` |
 | `LEADERBOARD_TIMEZONE` | нет | IANA TZ, по умолчанию `Europe/Moscow` |
 | `LEADERBOARD_MONTHLY_RUN_HOUR` | нет | Час monthly job (1-е число), по умолчанию `10` |
