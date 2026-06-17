@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, PropertyMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -52,7 +52,7 @@ def test_format_success_message_mentions():
     assert "<@&9001>" in text
     assert "успешно" in text
     assert "Дуркичи:" in text
-    assert "<@111> - 10" in text
+    assert "<@111> — 10 реакций" in text
     assert "Рофлинкичи:" in text
     assert "(нет данных за период)" in text
 
@@ -136,16 +136,60 @@ async def test_apply_rofler_role_strip_and_assign(tmp_path):
     guild = MagicMock()
     guild.id = 1000
     guild.get_role.return_value = role
-    type(role).members = PropertyMock(return_value=[holder])
-    guild.chunked = True
-    guild.get_member.side_effect = lambda uid: winner if uid == 20 else None
+    guild.get_member.side_effect = lambda uid: {
+        10: holder,
+        20: winner,
+    }.get(uid)
+
+    async def _fetch_member(uid):
+        return guild.get_member(uid)
+
+    guild.fetch_member = AsyncMock(side_effect=_fetch_member)
 
     bot = MagicMock()
 
-    result = await apply_rofler_role(bot, guild, [20], settings=settings)
+    result = await apply_rofler_role(
+        bot,
+        guild,
+        [20],
+        previous_holder_ids=[10],
+        settings=settings,
+    )
 
     assert result.success is True
     assert result.stripped_count == 1
     assert result.assigned_count == 1
+    assert result.first_run_strip_skipped is False
     holder.remove_roles.assert_awaited_once()
+    winner.add_roles.assert_awaited_once()
+
+
+async def test_apply_rofler_role_skips_strip_on_first_run(tmp_path):
+    settings = _settings(tmp_path)
+
+    role = MagicMock()
+    role.id = 9001
+
+    winner = MagicMock()
+    winner.id = 20
+    winner.roles = []
+    winner.add_roles = AsyncMock()
+
+    guild = MagicMock()
+    guild.id = 1000
+    guild.get_role.return_value = role
+    guild.get_member.return_value = None
+    guild.fetch_member = AsyncMock(return_value=winner)
+
+    result = await apply_rofler_role(
+        MagicMock(),
+        guild,
+        [20],
+        previous_holder_ids=[],
+        settings=settings,
+    )
+
+    assert result.success is True
+    assert result.stripped_count == 0
+    assert result.first_run_strip_skipped is True
     winner.add_roles.assert_awaited_once()

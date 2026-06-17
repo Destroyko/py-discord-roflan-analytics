@@ -1,4 +1,10 @@
-"""Monthly «Рофлер» role strip/assign and Discord notifications."""
+"""Rofler role reassignment without privileged Server Members Intent.
+
+Strip uses only user IDs stored from the previous successful assign run
+(``rofler_role_holders`` in SQLite). On the first run the table is empty —
+nothing is stripped automatically; remove the role manually from anyone who
+should not keep it.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +14,7 @@ import discord
 from discord.ext import commands
 
 from bot.config import Settings, get_settings
+from bot.database.db import Database
 from bot.services.channel_top_service import load_channel_leaderboard_for_period
 from bot.services.leaderboard_service import LeaderboardEntry
 from bot.utils.logger import get_logger
@@ -16,6 +23,12 @@ logger = get_logger(__name__)
 
 SECTION_DURKICHI = "Дуркичи"
 SECTION_ROFLINKICHI = "Рофлинкичи"
+
+FIRST_RUN_STRIP_NOTE = (
+    "Первый автоматический прогон: снятие роли по списку пропущено "
+    "(в БД ещё нет прошлых держателей). Снимите «Рофлер» вручную у тех, "
+    "кому роль не должна остаться."
+)
 
 
 @dataclass(frozen=True)
@@ -35,6 +48,7 @@ class RoleApplyResult:
     assigned_count: int = 0
     winner_ids: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    first_run_strip_skipped: bool = False
 
 
 def select_top_n_unique(
@@ -135,6 +149,8 @@ def format_rofler_success_message(
     role_id: int,
     durkichi: RoleSection,
     roflinkichi: RoleSection,
+    *,
+    first_run_strip_skipped: bool = False,
 ) -> str:
     """Plain-text success notice with clickable role and user mentions."""
     lines = [
@@ -144,6 +160,8 @@ def format_rofler_success_message(
         "",
         _format_section(roflinkichi),
     ]
+    if first_run_strip_skipped:
+        lines.extend(["", FIRST_RUN_STRIP_NOTE])
     return "\n".join(lines)
 
 
@@ -174,7 +192,7 @@ def _format_section(section: RoleSection) -> str:
         return "\n".join(lines)
     for entry in section.entries:
         lines.append(
-            f"{entry.rank}. <@{entry.author_id}> - {entry.total_reactions}"
+            f"{entry.rank}. <@{entry.author_id}> — {entry.total_reactions} реакций"
         )
     return "\n".join(lines)
 
@@ -223,66 +241,98 @@ async def post_rofler_error(bot: commands.Bot, content: str) -> None:
     )
 
 
+async def _resolve_rofler_role(
+    guild: discord.Guild, role_id: int
+) -> discord.Role | None:
+    role = guild.get_role(role_id)
+    if role is not None:
+        return role
+    try:
+        roles = await guild.fetch_roles()
+        return discord.utils.get(roles, id=role_id)
+    except discord.HTTPException:
+        return None
+
+
+async def _fetch_guild_member(
+    guild: discord.Guild, user_id: int
+) -> discord.Member | None:
+    member = guild.get_member(user_id)
+    if member is not None:
+        return member
+    try:
+        return await guild.fetch_member(user_id)
+    except discord.NotFound:
+        return None
+    except discord.HTTPException:
+        return None
+
+
 async def apply_rofler_role(
     bot: commands.Bot,
     guild: discord.Guild,
     user_ids: list[int],
     *,
+    previous_holder_ids: list[int],
     settings: Settings | None = None,
 ) -> RoleApplyResult:
-    """Strip the Rofler role from all holders, then assign to winners."""
+    """Strip Rofler from ``previous_holder_ids``, then assign to ``user_ids``.
+
+    Uses ``fetch_member`` per ID (no Server Members Intent). When
+    ``previous_holder_ids`` is empty, strip is skipped (first run — clean up
+    manually on the server).
+    """
+    _ = bot
     cfg = settings or get_settings()
     cfg.validate_role_settings()
     role_id = cfg.role_rofler_id
     assert role_id is not None
 
-    role = guild.get_role(role_id)
-    if role is None:
-        try:
-            roles = await guild.fetch_roles()
-            role = discord.utils.get(roles, id=role_id)
-        except discord.HTTPException as exc:
-            return RoleApplyResult(
-                success=False,
-                errors=[f"Cannot resolve role {role_id}: {exc}"],
-            )
+    role = await _resolve_rofler_role(guild, role_id)
     if role is None:
         return RoleApplyResult(
             success=False,
             errors=[f"Role {role_id} not found in guild {guild.id}"],
         )
 
-    result = RoleApplyResult(success=True, winner_ids=[str(uid) for uid in user_ids])
+    result = RoleApplyResult(
+        success=True,
+        winner_ids=[str(uid) for uid in user_ids],
+        first_run_strip_skipped=not previous_holder_ids,
+    )
     errors: list[str] = []
 
-    holders = list(role.members)
-    if not holders and not guild.chunked:
-        try:
-            await guild.chunk()
-            holders = list(role.members)
-        except discord.HTTPException as exc:
-            errors.append(f"Could not load guild members for strip: {exc}")
-
-    for member in holders:
-        try:
-            await member.remove_roles(role, reason="Monthly Rofler reassignment")
-            result.stripped_count += 1
-        except discord.Forbidden:
-            errors.append(f"No permission to remove role from {member.id}")
-        except discord.HTTPException as exc:
-            errors.append(f"Failed to remove role from {member.id}: {exc}")
+    if not previous_holder_ids:
+        logger.warning(
+            "Rofler strip skipped: no previous holders in DB for guild %s. %s",
+            guild.id,
+            FIRST_RUN_STRIP_NOTE,
+        )
+    else:
+        for user_id in previous_holder_ids:
+            member = await _fetch_guild_member(guild, user_id)
+            if member is None:
+                logger.info(
+                    "Previous holder %s not in guild; skip strip.", user_id
+                )
+                continue
+            if role not in member.roles:
+                continue
+            try:
+                await member.remove_roles(
+                    role, reason="Monthly Rofler reassignment"
+                )
+                result.stripped_count += 1
+            except discord.Forbidden:
+                errors.append(f"No permission to remove role from {user_id}")
+            except discord.HTTPException as exc:
+                errors.append(f"Failed to remove role from {user_id}: {exc}")
 
     for user_id in user_ids:
-        member = guild.get_member(user_id)
+        member = await _fetch_guild_member(guild, user_id)
         if member is None:
-            try:
-                member = await guild.fetch_member(user_id)
-            except discord.NotFound:
-                errors.append(f"User {user_id} not in guild")
-                continue
-            except discord.HTTPException as exc:
-                errors.append(f"Failed to fetch member {user_id}: {exc}")
-                continue
+            errors.append(f"User {user_id} not in guild")
+            continue
 
         if role in member.roles:
             result.assigned_count += 1
@@ -337,13 +387,33 @@ async def run_rofler_role_reassignment(
             await _report_role_failure(bot, year, month, [msg], settings)
             return RoleApplyResult(success=False, errors=[msg])
 
-    apply_result = await apply_rofler_role(bot, guild, winner_ids, settings=settings)
+    guild_id_str = str(settings.guild_id)
+    async with Database(settings.database_path) as db:
+        await db.init_db()
+        previous_holder_ids = await db.get_rofler_role_holder_ids(guild_id_str)
+
+    apply_result = await apply_rofler_role(
+        bot,
+        guild,
+        winner_ids,
+        previous_holder_ids=previous_holder_ids,
+        settings=settings,
+    )
 
     role_id = settings.role_rofler_id
     assert role_id is not None
 
     if apply_result.success:
-        text = format_rofler_success_message(role_id, durkichi, roflinkichi)
+        async with Database(settings.database_path) as db:
+            await db.init_db()
+            await db.replace_rofler_role_holders(guild_id_str, winner_ids)
+
+        text = format_rofler_success_message(
+            role_id,
+            durkichi,
+            roflinkichi,
+            first_run_strip_skipped=apply_result.first_run_strip_skipped,
+        )
         try:
             await post_rofler_notify(bot, text)
         except RuntimeError as exc:

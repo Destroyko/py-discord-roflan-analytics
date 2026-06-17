@@ -429,6 +429,37 @@ class Database:
         )
         return [(m, c, r) for m, c, r, _ in rows]
 
+    async def get_rofler_role_holder_ids(self, guild_id: str) -> list[int]:
+        """Return user IDs last assigned the Rofler role for this guild."""
+        cursor = await self.connection.execute(
+            "SELECT user_id FROM rofler_role_holders WHERE guild_id = ?",
+            (guild_id,),
+        )
+        rows = await cursor.fetchall()
+        await cursor.close()
+        return [int(uid) for (uid,) in rows]
+
+    async def replace_rofler_role_holders(
+        self, guild_id: str, user_ids: list[int]
+    ) -> None:
+        """Persist the current Rofler holders (used for strip on the next run)."""
+        await self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            await self.connection.execute(
+                "DELETE FROM rofler_role_holders WHERE guild_id = ?",
+                (guild_id,),
+            )
+            if user_ids:
+                await self.connection.executemany(
+                    "INSERT INTO rofler_role_holders (guild_id, user_id) "
+                    "VALUES (?, ?)",
+                    [(guild_id, str(uid)) for uid in user_ids],
+                )
+            await self.connection.commit()
+        except Exception:
+            await self.connection.rollback()
+            raise
+
 
 def message_rows_from(items: Iterable[MessageRow]) -> list[MessageRow]:
     """Convenience helper to materialize an iterable of rows."""

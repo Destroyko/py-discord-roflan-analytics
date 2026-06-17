@@ -50,8 +50,6 @@ def main() -> int:
 
     intents = discord.Intents.default()
     intents.guilds = True
-    if settings.role_reassign_enabled:
-        intents.members = True
 
     bot = LeaderboardBot(command_prefix="!", intents=intents)
 

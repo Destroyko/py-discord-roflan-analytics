@@ -108,11 +108,11 @@ async def _post_leaderboard_embed(
         top_n=settings.top_n,
     )
     embed = discord.Embed(
-        title=f"Leaderboard {year}-{month:02d}",
+        title=f"Рейтинг {year}-{month:02d}",
         description=description,
         colour=discord.Colour.blue(),
     )
-    embed.set_footer(text=f"SQLite: {settings.database_path}")
+    embed.set_footer(text="Источник: SQLite")
     await channel.send(embed=embed)
     logger.info("Posted leaderboard embed to channel %s.", channel_id)
 

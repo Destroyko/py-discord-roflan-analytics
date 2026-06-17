@@ -126,13 +126,9 @@ def _make_progress_editor(
             await interaction.edit_original_response(
 
                 content=(
-
-                    f"Scanning channel {event.channel_index}/{event.channels_total} "
-
-                    f"#{event.channel_name} — {event.messages_seen} msgs, "
-
-                    f"{event.messages_matched} matched…"
-
+                    f"Сканирую канал {event.channel_index}/{event.channels_total} "
+                    f"#{event.channel_name} — сообщений: {event.messages_seen}, "
+                    f"подошло: {event.messages_matched}…"
                 )
 
             )
@@ -185,22 +181,14 @@ class LeaderboardCog(commands.Cog):
 
         name="recalculate_leaderboard",
 
-        description="Rescan Discord and rebuild the monthly reaction leaderboard.",
-
+        description="Полный скан Discord и пересчёт рейтинга реакций за месяц.",
     )
-
     @app_commands.describe(
-
-        year="Calendar year, e.g. 2026",
-
-        month="Month 1-12",
-
-        post_results="Post TOP-N embed to LEADERBOARD_CHANNEL_ID",
-
-        assign_roles="Reassign the Rofler role to monthly channel TOP winners",
-
-        resume="Resume an interrupted scan for this month instead of starting fresh",
-
+        year="Год, например 2026",
+        month="Месяц 1–12",
+        post_results="Опубликовать TOP-N в канале LEADERBOARD_CHANNEL_ID",
+        assign_roles="Перевыдать роль «Рофлер» победителям месяца",
+        resume="Продолжить прерванный скан этого месяца",
     )
 
     async def recalculate_leaderboard(
@@ -225,7 +213,7 @@ class LeaderboardCog(commands.Cog):
 
             await interaction.response.send_message(
 
-                "You do not have permission to run this command.",
+                "У вас нет прав на эту команду.",
 
                 ephemeral=True,
 
@@ -239,7 +227,7 @@ class LeaderboardCog(commands.Cog):
 
             await interaction.response.send_message(
 
-                "Role reassignment is disabled (`ROLE_REASSIGN_ENABLED=false`).",
+                "Перевыдача ролей отключена (`ROLE_REASSIGN_ENABLED=false`).",
 
                 ephemeral=True,
 
@@ -289,15 +277,11 @@ class LeaderboardCog(commands.Cog):
 
                 interaction,
 
-                f"Scan for **{year}-{month:02d}** did not finish.\n"
-
-                f"Failed channels: {exc.stats.failed_channel_ids or '-'}\n"
-
-                f"Incomplete channels: {exc.stats.incomplete_channel_ids or '-'}\n"
-
-                "Database was not updated. Re-run with `resume: true` once access "
-
-                "is restored.",
+                f"Скан **{year}-{month:02d}** не завершён.\n"
+                f"Проблемные каналы: {exc.stats.failed_channel_ids or '—'}\n"
+                f"Неполные каналы: {exc.stats.incomplete_channel_ids or '—'}\n"
+                "База не обновлена. Повторите с параметром `resume: true`, "
+                "когда доступ восстановится.",
 
             )
 
@@ -305,7 +289,7 @@ class LeaderboardCog(commands.Cog):
 
             logger.exception("Slash recalculate failed.")
 
-            await self._edit_ephemeral(interaction, f"Pipeline failed: {exc}")
+            await self._edit_ephemeral(interaction, f"Ошибка пайплайна: {exc}")
 
 
 
@@ -313,18 +297,12 @@ class LeaderboardCog(commands.Cog):
 
         name="show_leaderboard",
 
-        description="Show TOP 5 for a month in one stats channel (from SQLite, no scan).",
-
+        description="TOP 5 за месяц по одному stats-каналу (из SQLite, без скана).",
     )
-
     @app_commands.describe(
-
-        year="Calendar year, e.g. 2026",
-
-        month="Month 1-12",
-
-        channel="Stats text channel (must be in STATS_CHANNEL_IDS)",
-
+        year="Год, например 2026",
+        month="Месяц 1–12",
+        channel="Текстовый канал из STATS_CHANNEL_IDS",
     )
 
     async def show_leaderboard(
@@ -383,7 +361,7 @@ class LeaderboardCog(commands.Cog):
 
             embed = discord.Embed(
 
-                title=f"Leaderboard {year}-{month:02d} · {channel_label}",
+                title=f"Рейтинг {year}-{month:02d} · {channel_label}",
 
                 description=description,
 
@@ -391,19 +369,21 @@ class LeaderboardCog(commands.Cog):
 
             )
 
-            embed.set_footer(text="From SQLite")
+            embed.set_footer(text="Из SQLite")
 
             await interaction.followup.send(embed=embed, ephemeral=True)
 
         except ValueError as exc:
 
-            await interaction.followup.send(f"Invalid input: {exc}", ephemeral=True)
+            await interaction.followup.send(f"Некорректные данные: {exc}", ephemeral=True)
 
         except Exception as exc:  # noqa: BLE001
 
             logger.exception("show_leaderboard failed.")
 
-            await interaction.followup.send(f"Failed to load leaderboard: {exc}", ephemeral=True)
+            await interaction.followup.send(
+                f"Не удалось загрузить рейтинг: {exc}", ephemeral=True
+            )
 
 
 
@@ -439,21 +419,15 @@ class LeaderboardCog(commands.Cog):
 
         )
 
-        storage = f"SQLite: `{settings.database_path}`"
-
         await self._edit_ephemeral(
 
             interaction,
 
-            f"Done **{year}-{month:02d}**.\n"
-
-            f"Messages: {result.messages_matched}, "
-
-            f"channels: {result.channels_completed} "
-
-            f"(skipped: {result.channels_skipped}).\n"
-
-            f"{storage}\n\n"
+            f"Готово **{year}-{month:02d}**.\n"
+            f"Сообщений: {result.messages_matched}, "
+            f"каналов: {result.channels_completed} "
+            f"(пропущено: {result.channels_skipped}).\n"
+            f"База: `{settings.database_path}`\n\n"
 
             f"```\n{top_text}\n```",
 

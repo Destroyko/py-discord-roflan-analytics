@@ -83,17 +83,17 @@ def format_console_top(
 ) -> str:
     """Render a short TOP-N summary for the terminal."""
     header = (
-        f"Leaderboard {year}-{month:02d} ({tz_label}), "
-        f"emoji {format_emoji_label(emoji_names)}, top {top_n}"
+        f"Рейтинг {year}-{month:02d} ({tz_label}), "
+        f"эмодзи {format_emoji_label(emoji_names)}, топ {top_n}"
     )
     if not entries:
-        return f"{header}\n  (no reactions found for this period)"
+        return f"{header}\n  (за этот период реакций нет)"
 
     lines = [header]
     for entry in entries[:top_n]:
         lines.append(
-            f"  {entry.rank}. user {entry.author_id} - "
-            f"{entry.total_reactions} reactions"
+            f"  {entry.rank}. пользователь {entry.author_id} — "
+            f"{entry.total_reactions} реакций"
         )
     return "\n".join(lines)
 
@@ -116,17 +116,17 @@ def format_embed_description(
     """Render TOP-N lines for a Discord embed description (max 4096 chars)."""
     scope = f" · {channel_label}" if channel_label else ""
     header = (
-        f"**Leaderboard {year}-{month:02d}** ({tz_label}){scope}\n"
-        f"Emoji {format_emoji_label(emoji_names)} · top {top_n}\n\n"
+        f"**Рейтинг {year}-{month:02d}** ({tz_label}){scope}\n"
+        f"Эмодзи {format_emoji_label(emoji_names)} · топ {top_n}\n\n"
     )
     if not entries:
-        return header + "_No reactions found for this period._"
+        return header + "_За этот период реакций не найдено._"
 
     lines = [header]
     for entry in entries[:top_n]:
         lines.append(
             f"**{entry.rank}.** <@{entry.author_id}> — "
-            f"{entry.total_reactions} reactions"
+            f"{entry.total_reactions} реакций"
         )
     text = "\n".join(lines)
     if len(text) > 4000:

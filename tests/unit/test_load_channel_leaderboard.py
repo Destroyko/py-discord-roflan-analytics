@@ -71,4 +71,4 @@ def test_format_embed_includes_channel_label():
         channel_label="#general",
     )
     assert "#general" in text
-    assert "top 5" in text
+    assert "топ 5" in text
