@@ -72,3 +72,21 @@ def test_format_embed_includes_channel_label():
     )
     assert "#general" in text
     assert "топ 5" in text
+
+
+def test_format_embed_omits_header_when_requested():
+    from bot.services.leaderboard_service import LeaderboardEntry
+
+    text = format_embed_description(
+        [LeaderboardEntry(rank=1, author_id="1", total_reactions=3)],
+        year=2026,
+        month=3,
+        tz_label="Europe/Moscow",
+        emoji_names=frozenset({"EBALO"}),
+        top_n=5,
+        channel_label="#general",
+        include_header=False,
+    )
+    assert "Рейтинг" not in text
+    assert "EBALO" not in text
+    assert "<@1>" in text

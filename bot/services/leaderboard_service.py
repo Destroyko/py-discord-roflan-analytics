@@ -112,17 +112,27 @@ def format_embed_description(
     emoji_names: frozenset[str],
     top_n: int,
     channel_label: str | None = None,
+    include_header: bool = True,
 ) -> str:
     """Render TOP-N lines for a Discord embed description (max 4096 chars)."""
-    scope = f" · {channel_label}" if channel_label else ""
-    header = (
-        f"**Рейтинг {year}-{month:02d}** ({tz_label}){scope}\n"
-        f"Эмодзи {format_emoji_label(emoji_names)} · топ {top_n}\n\n"
-    )
+    empty = "_За этот период реакций не найдено._"
     if not entries:
-        return header + "_За этот период реакций не найдено._"
+        if not include_header:
+            return empty
+        scope = f" · {channel_label}" if channel_label else ""
+        header = (
+            f"**Рейтинг {year}-{month:02d}** ({tz_label}){scope}\n"
+            f"Эмодзи {format_emoji_label(emoji_names)} · топ {top_n}\n\n"
+        )
+        return header + empty
 
-    lines = [header]
+    lines: list[str] = []
+    if include_header:
+        scope = f" · {channel_label}" if channel_label else ""
+        lines.append(
+            f"**Рейтинг {year}-{month:02d}** ({tz_label}){scope}\n"
+            f"Эмодзи {format_emoji_label(emoji_names)} · топ {top_n}\n"
+        )
     for entry in entries[:top_n]:
         lines.append(
             f"**{entry.rank}.** <@{entry.author_id}> — "

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from bot.pipeline import _prepare_checkpoint
-from bot.services.scan_checkpoint import new_checkpoint, save_checkpoint
+from bot.pipeline import CheckpointError, _prepare_checkpoint
+from bot.services.scan_checkpoint import load_checkpoint, new_checkpoint, save_checkpoint
 
 
 def _save(settings, run_id: str, phase: str):
@@ -19,20 +19,37 @@ def _save(settings, run_id: str, phase: str):
 
 
 def test_resume_without_checkpoint_raises(settings):
-    with pytest.raises(ValueError, match="Nothing to resume"):
+    with pytest.raises(CheckpointError, match="Нечего продолжать"):
         _prepare_checkpoint(settings, year=2026, month=1, resume=True)
 
 
 def test_resume_committed_raises(settings):
     _save(settings, "r1", "committed")
-    with pytest.raises(ValueError, match="already committed"):
+    with pytest.raises(CheckpointError, match="уже завершён"):
         _prepare_checkpoint(settings, year=2026, month=1, resume=True)
 
 
 def test_fresh_run_while_scanning_is_locked(settings):
     _save(settings, "r1", "scanning")
-    with pytest.raises(RuntimeError, match="already in progress"):
+    with pytest.raises(CheckpointError, match="уже выполняется"):
         _prepare_checkpoint(settings, year=2026, month=1, resume=False)
+
+
+def test_fresh_prepare_claims_checkpoint_immediately(settings):
+    checkpoint, run_id, stale_run_id = _prepare_checkpoint(
+        settings, year=2026, month=7, resume=False
+    )
+    assert stale_run_id is None
+    loaded = load_checkpoint(settings, 2026, 7)
+    assert loaded is not None
+    assert loaded.run_id == run_id
+    assert loaded.phase == "scanning"
+
+
+def test_second_fresh_prepare_rejected_after_claim(settings):
+    _prepare_checkpoint(settings, year=2026, month=8, resume=False)
+    with pytest.raises(CheckpointError, match="уже выполняется"):
+        _prepare_checkpoint(settings, year=2026, month=8, resume=False)
 
 
 def test_fresh_run_with_stale_checkpoint_returns_stale_id(settings):

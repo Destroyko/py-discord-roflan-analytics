@@ -99,19 +99,44 @@ def load_checkpoint(
     )
 
 
-def save_checkpoint(settings: Settings, checkpoint: ScanCheckpoint) -> None:
-    """Atomically persist the checkpoint (temp file + rename)."""
-    path = checkpoint_path(settings, checkpoint.year, checkpoint.month)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
+def _checkpoint_payload(checkpoint: ScanCheckpoint) -> dict:
+    return {
         "run_id": checkpoint.run_id,
         "guild_id": checkpoint.guild_id,
         "year": checkpoint.year,
         "month": checkpoint.month,
         "phase": checkpoint.phase,
         "locked_at": checkpoint.locked_at,
-        "channels": {cid: asdict(state) for cid, state in checkpoint.channels.items()},
+        "channels": {
+            cid: asdict(state) for cid, state in checkpoint.channels.items()
+        },
     }
+
+
+class CheckpointBusy(Exception):
+    """Another process holds an in-progress checkpoint for this period."""
+
+
+def claim_checkpoint(settings: Settings, checkpoint: ScanCheckpoint) -> None:
+    """Create the checkpoint file immediately; refuse if a run is in progress."""
+    path = checkpoint_path(settings, checkpoint.year, checkpoint.month)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    serialized = json.dumps(_checkpoint_payload(checkpoint), indent=2)
+    try:
+        with open(path, "x", encoding="utf-8") as handle:
+            handle.write(serialized)
+    except FileExistsError:
+        existing = load_checkpoint(settings, checkpoint.year, checkpoint.month)
+        if existing is not None and existing.phase in ("scanning", "ready_to_commit"):
+            raise CheckpointBusy(checkpoint.year, checkpoint.month)
+        save_checkpoint(settings, checkpoint)
+
+
+def save_checkpoint(settings: Settings, checkpoint: ScanCheckpoint) -> None:
+    """Atomically persist the checkpoint (temp file + rename)."""
+    path = checkpoint_path(settings, checkpoint.year, checkpoint.month)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = _checkpoint_payload(checkpoint)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     os.replace(tmp, path)

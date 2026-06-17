@@ -26,7 +26,13 @@ from bot.client import BotChannelReader
 
 from bot.config import get_settings
 
-from bot.pipeline import PipelineResult, ScanFailedError, run_pipeline
+from bot.pipeline import (
+    CheckpointError,
+    PipelineBusyError,
+    PipelineResult,
+    ScanFailedError,
+    run_pipeline,
+)
 from bot.services.daily_sync import run_daily_sync
 
 from bot.services.channel_top_service import load_channel_leaderboard_for_period
@@ -142,7 +148,19 @@ def _make_progress_editor(
     return on_progress
 
 
-
+def _format_scan_failed_message(
+    year: int, month: int, exc: ScanFailedError
+) -> str:
+    failed = ", ".join(str(c) for c in exc.stats.failed_channel_ids) or "—"
+    incomplete = ", ".join(str(c) for c in exc.stats.incomplete_channel_ids) or "—"
+    return (
+        f"Скан **{year}-{month:02d}** не завершён.\n"
+        f"Проблемные каналы: {failed}\n"
+        f"Неполные каналы: {incomplete}\n"
+        "База не обновлена.\n\n"
+        f"Повторите **/recalculate_leaderboard** с тем же годом и месяцем "
+        "и включите **resume: да**."
+    )
 
 
 class LeaderboardCog(commands.Cog):
@@ -274,22 +292,30 @@ class LeaderboardCog(commands.Cog):
             logger.warning("Slash recalculate did not commit: %s", exc)
 
             await self._edit_ephemeral(
-
                 interaction,
-
-                f"Скан **{year}-{month:02d}** не завершён.\n"
-                f"Проблемные каналы: {exc.stats.failed_channel_ids or '—'}\n"
-                f"Неполные каналы: {exc.stats.incomplete_channel_ids or '—'}\n"
-                "База не обновлена. Повторите с параметром `resume: true`, "
-                "когда доступ восстановится.",
-
+                _format_scan_failed_message(year, month, exc),
             )
+
+        except CheckpointError as exc:
+
+            logger.warning("Slash recalculate checkpoint: %s", exc)
+
+            await self._edit_ephemeral(interaction, exc.user_message)
+
+        except PipelineBusyError as exc:
+
+            logger.info("Slash recalculate rejected (busy): %s", exc)
+
+            await self._edit_ephemeral(interaction, exc.user_message)
 
         except Exception as exc:  # noqa: BLE001 - report to invoker only
 
             logger.exception("Slash recalculate failed.")
 
-            await self._edit_ephemeral(interaction, f"Ошибка пайплайна: {exc}")
+            await self._edit_ephemeral(
+                interaction,
+                f"Неожиданная ошибка: {exc}",
+            )
 
 
 
@@ -355,7 +381,7 @@ class LeaderboardCog(commands.Cog):
 
                 top_n=_SHOW_LEADERBOARD_TOP_N,
 
-                channel_label=channel_label,
+                include_header=False,
 
             )
 
@@ -401,6 +427,22 @@ class LeaderboardCog(commands.Cog):
 
     ) -> None:
 
+        await self._edit_ephemeral(
+
+            interaction,
+
+            self._build_recalculate_success_text(year, month, result),
+
+        )
+
+
+
+    @staticmethod
+    def _build_recalculate_success_text(
+        year: int,
+        month: int,
+        result: PipelineResult,
+    ) -> str:
         settings = get_settings()
 
         top_text = format_console_top(
@@ -419,19 +461,19 @@ class LeaderboardCog(commands.Cog):
 
         )
 
-        await self._edit_ephemeral(
-
-            interaction,
-
+        text = (
             f"Готово **{year}-{month:02d}**.\n"
             f"Сообщений: {result.messages_matched}, "
             f"каналов: {result.channels_completed} "
             f"(пропущено: {result.channels_skipped}).\n"
-            f"База: `{settings.database_path}`\n\n"
-
-            f"```\n{top_text}\n```",
-
+            f"База: `{settings.database_path}`"
         )
+        if result.warnings:
+            text += "\n\n**Внимание:**\n" + "\n".join(
+                f"• {w}" for w in result.warnings
+            )
+        text += f"\n\n```\n{top_text}\n```"
+        return text
 
 
 

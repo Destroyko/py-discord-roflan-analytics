@@ -24,8 +24,16 @@ from bot.services.leaderboard_service import (
     format_console_top,
     format_embed_description,
 )
+from bot.services.run_lock import (
+    PipelineBusyError,
+    release_memory_run,
+    scan_busy_message,
+    try_acquire_memory_run,
+)
 from bot.services.scan_checkpoint import (
     ScanCheckpoint,
+    CheckpointBusy,
+    claim_checkpoint,
     clear_checkpoint,
     load_checkpoint,
     new_checkpoint,
@@ -61,6 +69,14 @@ class ScanFailedError(RuntimeError):
         )
 
 
+class CheckpointError(Exception):
+    """Preflight failure: resume lock, nothing to resume, etc."""
+
+    def __init__(self, user_message: str) -> None:
+        self.user_message = user_message
+        super().__init__(user_message)
+
+
 @dataclass
 class PipelineResult:
     """Outcome of a single pipeline run."""
@@ -74,6 +90,28 @@ class PipelineResult:
     top_entries: list[LeaderboardEntry]
     failed_channel_ids: list[int] = field(default_factory=list)
     incomplete_channel_ids: list[int] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+def _embed_channel_error(channel_id: int, exc: Exception) -> str:
+    """Plain-Russian warning when LEADERBOARD_CHANNEL_ID cannot be posted to."""
+    if isinstance(exc, discord.Forbidden):
+        return (
+            f"Не удалось опубликовать TOP в канал `{channel_id}` "
+            f"(LEADERBOARD_CHANNEL_ID): у бота нет доступа. "
+            "Проверьте ID канала и права (просмотр канала, отправка сообщений)."
+        )
+    if isinstance(exc, discord.NotFound):
+        return (
+            f"Канал `{channel_id}` (LEADERBOARD_CHANNEL_ID) не найден. "
+            "Проверьте ID в `.env`."
+        )
+    if isinstance(exc, discord.HTTPException):
+        detail = exc.text or str(exc)
+        return (
+            f"Не удалось опубликовать TOP в канал `{channel_id}`: {detail}"
+        )
+    return f"Не удалось опубликовать TOP в канал `{channel_id}`: {exc}"
 
 
 async def _post_leaderboard_embed(
@@ -83,21 +121,32 @@ async def _post_leaderboard_embed(
     year: int,
     month: int,
     entries: list[LeaderboardEntry],
-) -> None:
+) -> str | None:
+    """Post the public leaderboard embed. Returns a user warning or ``None``."""
     channel_id = settings.leaderboard_channel_id
     if channel_id is None:
         logger.warning(
             "post_embed requested but LEADERBOARD_CHANNEL_ID is not set; skipping."
         )
-        return
+        return (
+            "Публикация TOP пропущена: `LEADERBOARD_CHANNEL_ID` не задан в `.env`."
+        )
 
-    channel = await bot.fetch_channel(channel_id)
+    try:
+        channel = await bot.fetch_channel(channel_id)
+    except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
+        logger.warning("Cannot fetch LEADERBOARD_CHANNEL_ID %s: %s", channel_id, exc)
+        return _embed_channel_error(channel_id, exc)
+
     if not isinstance(channel, discord.TextChannel):
         logger.warning(
             "LEADERBOARD_CHANNEL_ID %s is not a text channel; skipping embed.",
             channel_id,
         )
-        return
+        return (
+            f"Канал `{channel_id}` (LEADERBOARD_CHANNEL_ID) не текстовый — "
+            "embed не отправлен."
+        )
 
     description = format_embed_description(
         entries,
@@ -113,8 +162,14 @@ async def _post_leaderboard_embed(
         colour=discord.Colour.blue(),
     )
     embed.set_footer(text="Источник: SQLite")
-    await channel.send(embed=embed)
+    try:
+        await channel.send(embed=embed)
+    except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
+        logger.warning("Cannot post embed to channel %s: %s", channel_id, exc)
+        return _embed_channel_error(channel_id, exc)
+
     logger.info("Posted leaderboard embed to channel %s.", channel_id)
+    return None
 
 
 def _prepare_checkpoint(
@@ -134,13 +189,17 @@ def _prepare_checkpoint(
 
     if resume:
         if existing is None:
-            raise ValueError(
-                f"Nothing to resume for {year}-{month:02d}: no checkpoint found."
+            raise CheckpointError(
+                f"Нечего продолжать за **{year}-{month:02d}**: незавершённого скана нет "
+                "(пересчёт уже завершён или ещё не начинался).\n"
+                f"Запустите **/recalculate_leaderboard** с тем же годом и месяцем "
+                "без **resume**."
             )
         if existing.phase == "committed":
-            raise ValueError(
-                f"Run for {year}-{month:02d} already committed; "
-                "delete the checkpoint to scan again."
+            raise CheckpointError(
+                f"Пересчёт за **{year}-{month:02d}** уже завершён.\n"
+                "Чтобы сканировать заново, удалите чекпоинт на сервере "
+                "или обратитесь к администратору."
             )
         logger.info(
             "Resuming run %s for %s-%02d (phase=%s).",
@@ -152,11 +211,7 @@ def _prepare_checkpoint(
         return existing, existing.run_id, None
 
     if existing is not None and existing.phase in ("scanning", "ready_to_commit"):
-        raise RuntimeError(
-            f"A scan for {year}-{month:02d} is already in progress "
-            f"(run {existing.run_id}, phase {existing.phase}). "
-            "Resume it with --resume, or delete the checkpoint to start over."
-        )
+        raise CheckpointError(scan_busy_message(year, month))
 
     stale_run_id = existing.run_id if existing is not None else None
     checkpoint = new_checkpoint(
@@ -166,7 +221,17 @@ def _prepare_checkpoint(
         month=month,
         channel_ids=settings.stats_channel_ids,
     )
+    _claim_new_checkpoint(settings, checkpoint)
     return checkpoint, checkpoint.run_id, stale_run_id
+
+
+def _claim_new_checkpoint(settings: Settings, checkpoint: ScanCheckpoint) -> None:
+    try:
+        claim_checkpoint(settings, checkpoint)
+    except CheckpointBusy:
+        raise CheckpointError(
+            scan_busy_message(checkpoint.year, checkpoint.month)
+        ) from None
 
 
 async def run_pipeline(
@@ -184,6 +249,40 @@ async def run_pipeline(
     """Run the full leaderboard pipeline for the given month."""
     validate_period(year, month)
     settings = get_settings()
+
+    if not try_acquire_memory_run(settings.guild_id, year, month):
+        raise PipelineBusyError(year, month)
+
+    try:
+        return await _run_pipeline_body(
+            year,
+            month,
+            settings=settings,
+            reader=reader,
+            post_embed=post_embed,
+            assign_roles=assign_roles,
+            bot=bot,
+            print_top=print_top,
+            resume=resume,
+            on_progress=on_progress,
+        )
+    finally:
+        release_memory_run(settings.guild_id, year, month)
+
+
+async def _run_pipeline_body(
+    year: int,
+    month: int,
+    *,
+    settings: Settings,
+    reader: ChannelReader | None = None,
+    post_embed: bool = False,
+    assign_roles: bool = False,
+    bot: commands.Bot | None = None,
+    print_top: bool = True,
+    resume: bool = False,
+    on_progress: ScanProgressCallback | None = None,
+) -> PipelineResult:
 
     after_local, before_local = month_bounds(year, month)
     after_utc, before_utc = month_bounds_utc(year, month)
@@ -269,16 +368,19 @@ async def run_pipeline(
             month=month,
         )
 
+    warnings: list[str] = []
     if post_embed:
         if bot is None:
             raise ValueError("post_embed=True requires a running bot instance")
-        await _post_leaderboard_embed(
+        embed_warning = await _post_leaderboard_embed(
             bot,
             settings,
             year=year,
             month=month,
             entries=entries,
         )
+        if embed_warning is not None:
+            warnings.append(embed_warning)
 
     report_note = str(settings.database_path)
     logger.info(
@@ -299,6 +401,7 @@ async def run_pipeline(
         top_entries=top_entries,
         failed_channel_ids=list(stats.failed_channel_ids),
         incomplete_channel_ids=list(stats.incomplete_channel_ids),
+        warnings=warnings,
     )
 
 

@@ -111,7 +111,85 @@ async def test_recalculate_reports_resume_hint_on_scan_failed(cogmod, cog, monke
     interaction.edit_original_response.assert_awaited_once()
     call = interaction.edit_original_response.await_args
     content = call.kwargs.get("content") or call.args[0]
-    assert "resume" in content.lower()
+    assert "resume: да" in content.lower()
+    assert "/recalculate_leaderboard" in content
+
+
+async def test_recalculate_checkpoint_error_shown(cogmod, cog, monkeypatch):
+    from bot.pipeline import CheckpointError
+
+    interaction = _slash_interaction()
+    monkeypatch.setattr(cogmod, "_can_recalculate", lambda _i: True)
+    monkeypatch.setattr(
+        cogmod,
+        "run_pipeline",
+        AsyncMock(
+            side_effect=CheckpointError(
+                "Нечего продолжать за **2026-05**: незавершённого скана нет."
+            )
+        ),
+    )
+    monkeypatch.setattr(cogmod, "BotChannelReader", MagicMock())
+
+    await cog.recalculate_leaderboard.callback(
+        cog, interaction, 2026, 5, False, False, True
+    )
+
+    content = interaction.edit_original_response.await_args.kwargs.get("content") or (
+        interaction.edit_original_response.await_args.args[0]
+    )
+    assert "Нечего продолжать" in content
+
+
+async def test_recalculate_busy_rejected(cogmod, cog, monkeypatch):
+    from bot.pipeline import PipelineBusyError
+
+    interaction = _slash_interaction()
+    monkeypatch.setattr(cogmod, "_can_recalculate", lambda _i: True)
+    monkeypatch.setattr(
+        cogmod,
+        "run_pipeline",
+        AsyncMock(
+            side_effect=PipelineBusyError(2026, 5),
+        ),
+    )
+    monkeypatch.setattr(cogmod, "BotChannelReader", MagicMock())
+
+    await cog.recalculate_leaderboard.callback(cog, interaction, 2026, 5)
+
+    content = interaction.edit_original_response.await_args.kwargs.get("content") or (
+        interaction.edit_original_response.await_args.args[0]
+    )
+    assert "уже выполняется" in content
+
+
+async def test_recalculate_success_shows_embed_warning(cogmod, cog, monkeypatch):
+    from bot.pipeline import PipelineResult
+    from bot.services.leaderboard_service import LeaderboardEntry
+
+    interaction = _slash_interaction()
+    monkeypatch.setattr(cogmod, "_can_recalculate", lambda _i: True)
+    result = PipelineResult(
+        success=True,
+        run_id="r",
+        messages_matched=10,
+        channels_completed=2,
+        channels_skipped=0,
+        channels_failed=0,
+        top_entries=[LeaderboardEntry(rank=1, author_id="1", total_reactions=5)],
+        warnings=["Не удалось опубликовать TOP в канал `123`: нет доступа."],
+    )
+    monkeypatch.setattr(cogmod, "run_pipeline", AsyncMock(return_value=result))
+    monkeypatch.setattr(cogmod, "BotChannelReader", MagicMock())
+
+    await cog.recalculate_leaderboard.callback(cog, interaction, 2026, 5)
+
+    content = interaction.edit_original_response.await_args.kwargs.get("content") or (
+        interaction.edit_original_response.await_args.args[0]
+    )
+    assert "Готово" in content
+    assert "Внимание" in content
+    assert "нет доступа" in content
 
 
 async def test_recalculate_denies_without_role(cogmod, cog, monkeypatch):
