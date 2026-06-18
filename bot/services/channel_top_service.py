@@ -7,7 +7,13 @@ from dataclasses import dataclass
 from bot.config import get_settings
 from bot.database.db import Database
 from bot.services.leaderboard_service import LeaderboardEntry, format_emoji_label
-from bot.utils.dates import month_bounds_utc, to_db_timestamp, validate_period
+from bot.utils.dates import (
+    format_db_timestamp_local,
+    local_timezone_short_label,
+    month_bounds_utc,
+    to_db_timestamp,
+    validate_period,
+)
 from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -90,6 +96,41 @@ async def load_channel_leaderboard_for_period(
         LeaderboardEntry(rank=index, author_id=author_id, total_reactions=total)
         for index, (author_id, total) in enumerate(rows, start=1)
     ]
+
+
+async def load_channel_last_scanned_for_period(
+    year: int,
+    month: int,
+    channel_id: int,
+) -> str | None:
+    """Return latest ``last_scanned_at`` (UTC DB string) for channel + month."""
+    validate_period(year, month)
+    settings = get_settings()
+    if channel_id not in settings.stats_channel_ids:
+        raise ValueError(
+            f"Channel {channel_id} is not in STATS_CHANNEL_IDS; "
+            "pick a configured stats channel."
+        )
+    after_utc, before_utc = month_bounds_utc(year, month)
+    after_db = to_db_timestamp(after_utc)
+    before_db = to_db_timestamp(before_utc)
+
+    async with Database(settings.database_path) as db:
+        return await db.get_max_last_scanned_at_for_channel(
+            str(settings.guild_id),
+            str(channel_id),
+            after_db,
+            before_db,
+        )
+
+
+def format_last_sync_footer(last_scanned_db: str | None) -> str:
+    """Embed footer: SQLite source + last Discord sync time in local TZ."""
+    local_time = format_db_timestamp_local(last_scanned_db)
+    if local_time is None:
+        return "Из SQLite · синхронизация с Discord не выполнялась"
+    tz_label = local_timezone_short_label()
+    return f"Из SQLite · синхронизация: {local_time} ({tz_label})"
 
 
 def format_console_channel_tops(

@@ -167,3 +167,24 @@ def to_db_timestamp(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).strftime(_DB_TIMESTAMP_FORMAT)
+
+
+def parse_db_timestamp(db_ts: str) -> datetime:
+    """Parse a UTC timestamp string stored in SQLite."""
+    return datetime.strptime(db_ts, _DB_TIMESTAMP_FORMAT).replace(tzinfo=timezone.utc)
+
+
+def format_db_timestamp_local(db_ts: str | None) -> str | None:
+    """Format a DB UTC timestamp for display in the configured timezone."""
+    if db_ts is None:
+        return None
+    local = parse_db_timestamp(db_ts).astimezone(get_tz())
+    return local.strftime("%d.%m.%Y %H:%M")
+
+
+def local_timezone_short_label() -> str:
+    """Short label for embed footers (МСК for Europe/Moscow)."""
+    tz_name = get_settings().timezone
+    if tz_name == "Europe/Moscow":
+        return "МСК"
+    return tz_name

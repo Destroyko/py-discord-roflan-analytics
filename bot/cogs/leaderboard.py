@@ -35,7 +35,11 @@ from bot.pipeline import (
 )
 from bot.services.daily_sync import run_daily_sync
 
-from bot.services.channel_top_service import load_channel_leaderboard_for_period
+from bot.services.channel_top_service import (
+    format_last_sync_footer,
+    load_channel_last_scanned_for_period,
+    load_channel_leaderboard_for_period,
+)
 
 from bot.services.leaderboard_service import (
 
@@ -365,6 +369,16 @@ class LeaderboardCog(commands.Cog):
 
             )
 
+            last_scanned = await load_channel_last_scanned_for_period(
+
+                year,
+
+                month,
+
+                channel.id,
+
+            )
+
             channel_label = f"#{channel.name}"
 
             description = format_embed_description(
@@ -395,7 +409,7 @@ class LeaderboardCog(commands.Cog):
 
             )
 
-            embed.set_footer(text="Из SQLite")
+            embed.set_footer(text=format_last_sync_footer(last_scanned))
 
             await interaction.followup.send(embed=embed, ephemeral=True)
 

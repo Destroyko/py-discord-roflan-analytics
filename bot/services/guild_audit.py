@@ -124,6 +124,21 @@ async def _resolve_channel(
         return None
 
 
+def channels_requiring_post_permissions(
+    settings: Settings,
+) -> list[tuple[str, int]]:
+    """Env label + channel id for startup send/embed permission checks."""
+    candidates: list[tuple[str, int | None]] = [
+        ("LEADERBOARD_CHANNEL_ID", settings.leaderboard_channel_id),
+        ("ROLE_NOTIFY_CHANNEL_ID", settings.role_notify_channel_id),
+    ]
+    if role_features_configured(settings):
+        candidates.append(
+            ("ROLE_ERROR_CHANNEL_ID", settings.role_error_channel_id)
+        )
+    return [(label, channel_id) for label, channel_id in candidates if channel_id is not None]
+
+
 async def audit_guild_permissions(
     bot: commands.Bot,
     settings: Settings,
@@ -175,39 +190,22 @@ async def audit_guild_permissions(
             require_text=True,
         )
 
-    if settings.leaderboard_channel_id is not None:
-        cid = settings.leaderboard_channel_id
-        if cid not in seen_channels:
-            seen_channels.add(cid)
+    for env_name, channel_id in channels_requiring_post_permissions(settings):
+        if channel_id in seen_channels:
+            continue
+        seen_channels.add(channel_id)
         await _audit_channel(
             bot,
             guild,
             member,
-            cid,
-            label="LEADERBOARD_CHANNEL_ID",
+            channel_id,
+            label=env_name,
             required=_CHANNEL_POST,
             report=report,
             require_text=True,
         )
 
     if role_features_configured(settings):
-        for env_name, cid in (
-            ("ROLE_NOTIFY_CHANNEL_ID", settings.role_notify_channel_id),
-            ("ROLE_ERROR_CHANNEL_ID", settings.role_error_channel_id),
-        ):
-            if cid is None:
-                continue
-            await _audit_channel(
-                bot,
-                guild,
-                member,
-                cid,
-                label=env_name,
-                required=_CHANNEL_POST,
-                report=report,
-                require_text=True,
-            )
-
         rofler_id = settings.role_rofler_id
         assert rofler_id is not None
         target = guild.get_role(rofler_id)

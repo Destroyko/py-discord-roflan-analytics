@@ -327,6 +327,29 @@ class Database:
         await cursor.close()
         return [(str(author_id), int(total)) for author_id, total in rows]
 
+    async def get_max_last_scanned_at_for_channel(
+        self,
+        guild_id: str,
+        channel_id: str,
+        after: str,
+        before: str,
+    ) -> str | None:
+        """Latest ``last_scanned_at`` for rows in the period (UTC DB string)."""
+        cursor = await self.connection.execute(
+            """
+            SELECT MAX(last_scanned_at)
+            FROM messages
+            WHERE guild_id = ? AND channel_id = ?
+              AND created_at >= ? AND created_at < ?
+            """,
+            (guild_id, channel_id, after, before),
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        if row is None or row[0] is None:
+            return None
+        return str(row[0])
+
     async def get_period_audit(
         self, guild_id: str, after: str, before: str
     ) -> dict[str, object]:
