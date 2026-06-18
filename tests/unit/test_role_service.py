@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+import discord
 import pytest
 
 from bot.config import Settings
 from bot.services.leaderboard_service import LeaderboardEntry
 from bot.services.role_service import (
+    FIRST_RUN_STRIP_NOTE,
     RoleSection,
     SECTION_DURKICHI,
     SECTION_ROFLINKICHI,
@@ -16,12 +18,13 @@ from bot.services.role_service import (
     collect_winner_user_ids,
     format_rofler_failure_message,
     format_rofler_success_message,
+    post_first_run_strip_note,
     select_top_n_unique,
 )
 
 
-def _settings(tmp_path) -> Settings:
-    return Settings(
+def _settings(tmp_path, **kwargs) -> Settings:
+    base = dict(
         discord_bot_token="t",
         guild_id=1000,
         stats_channel_ids=[111, 222],
@@ -35,6 +38,8 @@ def _settings(tmp_path) -> Settings:
         role_reassign_enabled=True,
         database_path=tmp_path / "db.sqlite",
     )
+    base.update(kwargs)
+    return Settings(**base)
 
 
 def test_format_success_message_mentions():
@@ -55,6 +60,28 @@ def test_format_success_message_mentions():
     assert "<@111> — 10 реакций" in text
     assert "Рофлинкичи:" in text
     assert "(нет данных за период)" in text
+    assert "Первый автоматический прогон" not in text
+
+
+def test_format_success_message_omits_first_run_strip_note():
+    durkichi = RoleSection(title=SECTION_DURKICHI, entries=[])
+    roflinkichi = RoleSection(title=SECTION_ROFLINKICHI, entries=[])
+    text = format_rofler_success_message(9001, durkichi, roflinkichi)
+    assert FIRST_RUN_STRIP_NOTE not in text
+
+
+@pytest.mark.asyncio
+async def test_post_first_run_strip_note_uses_leaderboard_channel(tmp_path):
+    settings = _settings(tmp_path, leaderboard_channel_id=7001)
+    bot = MagicMock()
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.send = AsyncMock()
+    bot.fetch_channel = AsyncMock(return_value=channel)
+
+    await post_first_run_strip_note(bot, settings)
+
+    bot.fetch_channel.assert_awaited_once_with(7001)
+    channel.send.assert_awaited_once_with(FIRST_RUN_STRIP_NOTE)
 
 
 def test_format_failure_message_lists_errors():

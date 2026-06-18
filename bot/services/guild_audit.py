@@ -219,7 +219,7 @@ async def audit_guild_permissions(
 
         if target is None:
             report.issues.append(f"ROLE_ROFLER_ID: role {rofler_id} not found")
-        elif member.top_role >= target:
+        elif not member.top_role > target:
             report.issues.append(
                 "Role hierarchy: bot role "
                 f"«{member.top_role.name}» must be **above** "

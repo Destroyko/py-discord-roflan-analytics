@@ -149,8 +149,6 @@ def format_rofler_success_message(
     role_id: int,
     durkichi: RoleSection,
     roflinkichi: RoleSection,
-    *,
-    first_run_strip_skipped: bool = False,
 ) -> str:
     """Plain-text success notice with clickable role and user mentions."""
     lines = [
@@ -160,8 +158,6 @@ def format_rofler_success_message(
         "",
         _format_section(roflinkichi),
     ]
-    if first_run_strip_skipped:
-        lines.extend(["", FIRST_RUN_STRIP_NOTE])
     return "\n".join(lines)
 
 
@@ -238,6 +234,22 @@ async def post_rofler_error(bot: commands.Bot, content: str) -> None:
         settings.role_error_channel_id,  # type: ignore[arg-type]
         content,
         label="role error",
+    )
+
+
+async def post_first_run_strip_note(bot: commands.Bot, settings: Settings) -> None:
+    """Remind admins to strip Rofler manually — ``LEADERBOARD_CHANNEL_ID`` only."""
+    channel_id = settings.leaderboard_channel_id
+    if channel_id is None:
+        logger.warning(
+            "First-run strip note not posted: LEADERBOARD_CHANNEL_ID is not set."
+        )
+        return
+    await _send_text_to_channel(
+        bot,
+        channel_id,
+        FIRST_RUN_STRIP_NOTE,
+        label="first-run strip note",
     )
 
 
@@ -412,10 +424,18 @@ async def run_rofler_role_reassignment(
             role_id,
             durkichi,
             roflinkichi,
-            first_run_strip_skipped=apply_result.first_run_strip_skipped,
         )
         try:
             await post_rofler_notify(bot, text)
+            if apply_result.first_run_strip_skipped:
+                try:
+                    await post_first_run_strip_note(bot, settings)
+                except RuntimeError as exc:
+                    logger.warning(
+                        "Role reassignment succeeded but first-run strip note "
+                        "was not posted: %s",
+                        exc,
+                    )
         except RuntimeError as exc:
             apply_result.success = False
             apply_result.errors.append(str(exc))
