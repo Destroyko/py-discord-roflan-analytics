@@ -13,6 +13,7 @@ DEFAULT_TIMEZONE = "Europe/Moscow"
 DEFAULT_EMOJI = "EBALO"
 DEFAULT_DATABASE_PATH = "./data/leaderboard.db"
 DEFAULT_TOP_N = 10
+DEFAULT_LEADERBOARD_CHANNEL_TOP_N = 5
 DEFAULT_SCAN_BATCH_SIZE = 100
 DEFAULT_SCAN_PROGRESS_EVERY = 500
 DEFAULT_SCAN_CHECKPOINT_DIR = "./data"
@@ -48,6 +49,7 @@ class Settings:
     )
     database_path: Path = field(default_factory=lambda: Path(DEFAULT_DATABASE_PATH))
     top_n: int = DEFAULT_TOP_N
+    leaderboard_channel_top_n: int = DEFAULT_LEADERBOARD_CHANNEL_TOP_N
     leaderboard_channel_id: int | None = None
     manual_recalc_role_ids: frozenset[int] = field(default_factory=frozenset)
     scan_batch_size: int = DEFAULT_SCAN_BATCH_SIZE
@@ -101,6 +103,31 @@ class Settings:
                 )
         if self.role_durkichi_top_n < 1 or self.role_roflinkichi_top_n < 1:
             raise ValueError("ROLE_*_TOP_N must be at least 1")
+
+    def validate_leaderboard_post_channel_settings(self) -> None:
+        """Ensure durkichi/roflinkichi channels are set for public TOP posts."""
+        missing = [
+            name
+            for name, value in (
+                ("ROLE_DURKICHI_CHANNEL_ID", self.role_durkichi_channel_id),
+                ("ROLE_ROFLINKICHI_CHANNEL_ID", self.role_roflinkichi_channel_id),
+            )
+            if value is None
+        ]
+        if missing:
+            raise ValueError(
+                "Leaderboard channel TOP requires: " + ", ".join(missing)
+            )
+        for channel_id, label in (
+            (self.role_durkichi_channel_id, "ROLE_DURKICHI_CHANNEL_ID"),
+            (self.role_roflinkichi_channel_id, "ROLE_ROFLINKICHI_CHANNEL_ID"),
+        ):
+            if channel_id not in self.stats_channel_ids:
+                raise ValueError(
+                    f"{label} ({channel_id}) must be listed in STATS_CHANNEL_IDS"
+                )
+        if self.leaderboard_channel_top_n < 1:
+            raise ValueError("LEADERBOARD_CHANNEL_TOP_N must be at least 1")
 
 
 def _normalize_emoji_token(raw: str) -> str:
@@ -234,6 +261,14 @@ def get_settings() -> Settings:
     top_n = int((os.getenv("LEADERBOARD_TOP_N") or str(DEFAULT_TOP_N)).strip())
     if top_n < 1:
         raise ValueError("LEADERBOARD_TOP_N must be at least 1")
+    leaderboard_channel_top_n = int(
+        (
+            os.getenv("LEADERBOARD_CHANNEL_TOP_N")
+            or str(DEFAULT_LEADERBOARD_CHANNEL_TOP_N)
+        ).strip()
+    )
+    if leaderboard_channel_top_n < 1:
+        raise ValueError("LEADERBOARD_CHANNEL_TOP_N must be at least 1")
 
     scan_batch_size = int(
         (os.getenv("SCAN_BATCH_SIZE") or str(DEFAULT_SCAN_BATCH_SIZE)).strip()
@@ -295,6 +330,7 @@ def get_settings() -> Settings:
         emoji_names=emoji_names,
         database_path=database_path,
         top_n=top_n,
+        leaderboard_channel_top_n=leaderboard_channel_top_n,
         leaderboard_channel_id=_parse_optional_int(
             os.getenv("LEADERBOARD_CHANNEL_ID")
         ),

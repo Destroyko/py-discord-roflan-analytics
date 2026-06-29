@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from bot.config import get_settings
+from bot.config import Settings, get_settings
 from bot.database.db import Database
 from bot.services.leaderboard_service import LeaderboardEntry, format_emoji_label
 from bot.utils.dates import (
@@ -18,6 +18,9 @@ from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+LEADERBOARD_POST_SECTION_DURKICHI = "Дуркичи"
+LEADERBOARD_POST_SECTION_ROFLINKICHI = "Рофлинкичи"
+
 
 @dataclass(frozen=True)
 class ChannelTop:
@@ -25,6 +28,120 @@ class ChannelTop:
 
     channel_id: int
     entries: list[LeaderboardEntry]
+
+
+@dataclass(frozen=True)
+class NamedChannelTop:
+    """TOP-N for a stats channel with a display title."""
+
+    title: str
+    channel_id: int
+    entries: list[LeaderboardEntry]
+
+
+async def load_leaderboard_post_channel_tops(
+    year: int,
+    month: int,
+    *,
+    settings: Settings | None = None,
+) -> list[NamedChannelTop]:
+    """TOP per durkichi/roflinkichi channel for ``LEADERBOARD_CHANNEL_ID`` posts."""
+    cfg = settings or get_settings()
+    cfg.validate_leaderboard_post_channel_settings()
+    top_n = cfg.leaderboard_channel_top_n
+    durkichi_id = cfg.role_durkichi_channel_id
+    roflinkichi_id = cfg.role_roflinkichi_channel_id
+    assert durkichi_id is not None
+    assert roflinkichi_id is not None
+
+    durkichi = await load_channel_leaderboard_for_period(
+        year,
+        month,
+        durkichi_id,
+        limit=top_n,
+        excluded_user_ids=cfg.excluded_user_ids,
+    )
+    roflinkichi = await load_channel_leaderboard_for_period(
+        year,
+        month,
+        roflinkichi_id,
+        limit=top_n,
+        excluded_user_ids=cfg.excluded_user_ids,
+    )
+    return [
+        NamedChannelTop(
+            title=LEADERBOARD_POST_SECTION_DURKICHI,
+            channel_id=durkichi_id,
+            entries=durkichi,
+        ),
+        NamedChannelTop(
+            title=LEADERBOARD_POST_SECTION_ROFLINKICHI,
+            channel_id=roflinkichi_id,
+            entries=roflinkichi,
+        ),
+    ]
+
+
+def format_named_channel_tops_embed(
+    channel_tops: list[NamedChannelTop],
+    *,
+    year: int,
+    month: int,
+    tz_label: str,
+    emoji_names: frozenset[str],
+    top_n: int,
+) -> str:
+    """Render per-channel TOP blocks for a Discord embed description."""
+    header = (
+        f"**Рейтинг {year}-{month:02d}** ({tz_label})\n"
+        f"Эмодзи {format_emoji_label(emoji_names)} · топ {top_n} по каналу"
+    )
+    blocks = [header]
+    empty = "_За этот период реакций не найдено._"
+    for section in channel_tops:
+        blocks.append("")
+        blocks.append(f"**{section.title}** (<#{section.channel_id}>)")
+        if not section.entries:
+            blocks.append(empty)
+            continue
+        for entry in section.entries[:top_n]:
+            blocks.append(
+                f"**{entry.rank}.** <@{entry.author_id}> — "
+                f"{entry.total_reactions} реакций"
+            )
+    text = "\n".join(blocks)
+    if len(text) > 4000:
+        return text[:3997] + "..."
+    return text
+
+
+def format_named_channel_tops_console(
+    channel_tops: list[NamedChannelTop],
+    *,
+    year: int,
+    month: int,
+    tz_label: str,
+    emoji_names: frozenset[str],
+    top_n: int,
+) -> str:
+    """Plain-text TOP summary for CLI and ephemeral slash responses."""
+    header = (
+        f"Рейтинг {year}-{month:02d} ({tz_label}), "
+        f"эмодзи {format_emoji_label(emoji_names)}, топ {top_n} по каналу"
+    )
+    lines = [header]
+    for section in channel_tops:
+        lines.append("")
+        lines.append(f"{section.title} (канал {section.channel_id}):")
+        if not section.entries:
+            lines.append("  (за этот период реакций нет)")
+            continue
+        for entry in section.entries[:top_n]:
+            lines.append(
+                f"  {entry.rank}. пользователь {entry.author_id} — "
+                f"{entry.total_reactions} реакций"
+            )
+    return "\n".join(lines)
 
 
 async def build_channel_tops(

@@ -37,13 +37,12 @@ from bot.services.daily_sync import run_daily_sync
 
 from bot.services.channel_top_service import (
     format_last_sync_footer,
+    format_named_channel_tops_console,
     load_channel_last_scanned_for_period,
     load_channel_leaderboard_for_period,
 )
 
 from bot.services.leaderboard_service import (
-
-    format_console_top,
 
     format_embed_description,
 
@@ -208,7 +207,7 @@ class LeaderboardCog(commands.Cog):
     @app_commands.describe(
         year="Год, например 2026",
         month="Месяц 1–12",
-        post_results="Опубликовать TOP-N в канале LEADERBOARD_CHANNEL_ID",
+        post_results="Опубликовать TOP по дурке и рофлинкам в LEADERBOARD_CHANNEL_ID",
         assign_roles="Перевыдать роль «Рофлер» победителям месяца",
         resume="Продолжить прерванный скан этого месяца",
     )
@@ -459,21 +458,20 @@ class LeaderboardCog(commands.Cog):
     ) -> str:
         settings = get_settings()
 
-        top_text = format_console_top(
-
-            result.top_entries,
-
-            year=year,
-
-            month=month,
-
-            tz_label=settings.timezone,
-
-            emoji_names=settings.emoji_names,
-
-            top_n=settings.top_n,
-
-        )
+        if result.channel_post_tops:
+            top_text = format_named_channel_tops_console(
+                result.channel_post_tops,
+                year=year,
+                month=month,
+                tz_label=settings.timezone,
+                emoji_names=settings.emoji_names,
+                top_n=settings.leaderboard_channel_top_n,
+            )
+        else:
+            top_text = (
+                "TOP по каналам недоступен: задайте ROLE_DURKICHI_CHANNEL_ID и "
+                "ROLE_ROFLINKICHI_CHANNEL_ID в .env."
+            )
 
         text = (
             f"Готово **{year}-{month:02d}**.\n"

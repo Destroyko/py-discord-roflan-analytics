@@ -42,7 +42,7 @@ python -m bot.main
 | Когда | Что |
 |-------|-----|
 | Ежедневно (`DAILY_SYNC_HOUR`, по умолчанию 04:00 МСК) | Инкрементальное обновление **текущего** месяца в БД |
-| 1-го числа (`LEADERBOARD_MONTHLY_RUN_HOUR`, по умолчанию 10:00 МСК) | Полный пересчёт **предыдущего** месяца, embed в `LEADERBOARD_CHANNEL_ID`; перевыдача роли — если `ROLE_REASSIGN_ENABLED=true` |
+| 1-го числа (`LEADERBOARD_MONTHLY_RUN_HOUR`, по умолчанию 10:00 МСК) | Полный пересчёт **предыдущего** месяца; embed в `LEADERBOARD_CHANNEL_ID` — **топ 5** по каналам `ROLE_DURKICHI_CHANNEL_ID` и `ROLE_ROFLINKICHI_CHANNEL_ID`; перевыдача роли — если `ROLE_REASSIGN_ENABLED=true` |
 
 ### Slash-команды
 
@@ -82,11 +82,11 @@ python -m bot.cli channels-top --year 2026 --month 6
 - `reaction_count` — сумма реакций по эмодзи из `LEADERBOARD_EMOJIS` на сообщении.
 - `EXCLUDED_USER_IDS` — не сканируются и не в TOP.
 
-`/recalculate_leaderboard` в ответе показывает **общий** TOP по всем `STATS_CHANNEL_IDS`; `/show_leaderboard` — TOP **по одному** каналу.
+`/recalculate_leaderboard` в ответе показывает **топ по дурке и рофлинкам** (как в `LEADERBOARD_CHANNEL_ID`); `/show_leaderboard` — TOP **по одному** каналу.
 
 ## Перевыдача роли «Рофлер» (опционально)
 
-`ROLE_REASSIGN_ENABLED=false` по умолчанию — только статистика и embed.
+`ROLE_REASSIGN_ENABLED=false` по умолчанию — статистика, embed с топом по двум каналам; роли вручную.
 
 При `ROLE_REASSIGN_ENABLED=true`:
 
@@ -108,10 +108,11 @@ python -m bot.cli channels-top --year 2026 --month 6
 
 | Переменная | По умолчанию | Назначение |
 |------------|--------------|------------|
-| `LEADERBOARD_CHANNEL_ID` | — | Embed и алерты при сбое monthly-скана |
+| `LEADERBOARD_CHANNEL_ID` | — | Embed (топ по дурке/рофлинкам) и алерты при сбое monthly-скана |
+| `LEADERBOARD_CHANNEL_TOP_N` | `5` | Строк TOP на канал в embed / ответе `/recalculate_leaderboard` |
 | `LEADERBOARD_EMOJIS` | `EBALO` | Имена эмодзи через запятую |
 | `LEADERBOARD_TIMEZONE` | `Europe/Moscow` | Границы месяца и расписание |
-| `LEADERBOARD_TOP_N` | `10` | Строк в guild-wide embed / CLI TOP |
+| `LEADERBOARD_TOP_N` | `10` | Строк в CLI guild-wide TOP |
 | `DATABASE_PATH` | `./data/leaderboard.db` | SQLite |
 | `MANUAL_RECALC_ROLE_IDS` | — | Роли для `/recalculate_leaderboard` (Administrator всегда может) |
 | `DAILY_SYNC_ENABLED` | `true` | Ежедневный инкрементальный sync |
@@ -120,9 +121,11 @@ python -m bot.cli channels-top --year 2026 --month 6
 | `IGNORE_CHANNEL_IDS` | — | Исключить каналы из `STATS_CHANNEL_IDS` |
 | `EXCLUDED_USER_IDS` | — | Исключить пользователей из статистики |
 
-### Роли (`ROLE_REASSIGN_ENABLED=true`)
+### Каналы дурки/рофлинок и роли
 
-`ROLE_ROFLER_ID`, `ROLE_NOTIFY_CHANNEL_ID`, `ROLE_ERROR_CHANNEL_ID`, `ROLE_DURKICHI_CHANNEL_ID`, `ROLE_ROFLINKICHI_CHANNEL_ID` — каналы дурки/рофлинок должны быть в `STATS_CHANNEL_IDS`. Опционально: `ROLE_DURKICHI_TOP_N` (3), `ROLE_ROFLINKICHI_TOP_N` (2).
+`ROLE_DURKICHI_CHANNEL_ID`, `ROLE_ROFLINKICHI_CHANNEL_ID` — оба в `STATS_CHANNEL_IDS`; нужны для embed в `LEADERBOARD_CHANNEL_ID` (топ `LEADERBOARD_CHANNEL_TOP_N` по каждому).
+
+При `ROLE_REASSIGN_ENABLED=true` дополнительно: `ROLE_ROFLER_ID`, `ROLE_NOTIFY_CHANNEL_ID`, `ROLE_ERROR_CHANNEL_ID`. Автовыдача: TOP-3 + TOP-2 без пересечения (`ROLE_DURKICHI_TOP_N`, `ROLE_ROFLINKICHI_TOP_N`).
 
 ### Тонкая настройка скана
 

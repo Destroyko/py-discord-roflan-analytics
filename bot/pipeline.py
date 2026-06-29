@@ -18,11 +18,15 @@ from bot.client import ChannelReader, create_bot_http_reader
 from bot.config import Settings, get_settings
 from bot.database.db import Database
 from bot.services import role_service
+from bot.services.channel_top_service import (
+    NamedChannelTop,
+    format_named_channel_tops_embed,
+    load_leaderboard_post_channel_tops,
+)
 from bot.services.leaderboard_service import (
     LeaderboardEntry,
     build_leaderboard,
     format_console_top,
-    format_embed_description,
 )
 from bot.services.run_lock import (
     PipelineBusyError,
@@ -88,6 +92,7 @@ class PipelineResult:
     channels_skipped: int
     channels_failed: int
     top_entries: list[LeaderboardEntry]
+    channel_post_tops: list[NamedChannelTop] = field(default_factory=list)
     failed_channel_ids: list[int] = field(default_factory=list)
     incomplete_channel_ids: list[int] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -120,9 +125,9 @@ async def _post_leaderboard_embed(
     *,
     year: int,
     month: int,
-    entries: list[LeaderboardEntry],
+    channel_tops: list[NamedChannelTop],
 ) -> str | None:
-    """Post the public leaderboard embed. Returns a user warning or ``None``."""
+    """Post per-channel TOP embed to ``LEADERBOARD_CHANNEL_ID``."""
     channel_id = settings.leaderboard_channel_id
     if channel_id is None:
         logger.warning(
@@ -131,6 +136,12 @@ async def _post_leaderboard_embed(
         return (
             "Публикация TOP пропущена: `LEADERBOARD_CHANNEL_ID` не задан в `.env`."
         )
+
+    try:
+        settings.validate_leaderboard_post_channel_settings()
+    except ValueError as exc:
+        logger.warning("Leaderboard post channel config invalid: %s", exc)
+        return f"Публикация TOP пропущена: {exc}"
 
     try:
         channel = await bot.fetch_channel(channel_id)
@@ -148,13 +159,13 @@ async def _post_leaderboard_embed(
             "embed не отправлен."
         )
 
-    description = format_embed_description(
-        entries,
+    description = format_named_channel_tops_embed(
+        channel_tops,
         year=year,
         month=month,
         tz_label=settings.timezone,
         emoji_names=settings.emoji_names,
-        top_n=settings.top_n,
+        top_n=settings.leaderboard_channel_top_n,
     )
     embed = discord.Embed(
         title=f"Рейтинг {year}-{month:02d}",
@@ -368,19 +379,37 @@ async def _run_pipeline_body(
             month=month,
         )
 
+    channel_post_tops: list[NamedChannelTop] = []
+    try:
+        settings.validate_leaderboard_post_channel_settings()
+        channel_post_tops = await load_leaderboard_post_channel_tops(
+            year, month, settings=settings
+        )
+    except ValueError:
+        pass
+
     warnings: list[str] = []
     if post_embed:
         if bot is None:
             raise ValueError("post_embed=True requires a running bot instance")
-        embed_warning = await _post_leaderboard_embed(
-            bot,
-            settings,
-            year=year,
-            month=month,
-            entries=entries,
-        )
-        if embed_warning is not None:
-            warnings.append(embed_warning)
+        if not channel_post_tops:
+            warning = (
+                "Публикация TOP пропущена: задайте "
+                "`ROLE_DURKICHI_CHANNEL_ID` и `ROLE_ROFLINKICHI_CHANNEL_ID` "
+                "(оба в `STATS_CHANNEL_IDS`)."
+            )
+            logger.warning(warning)
+            warnings.append(warning)
+        else:
+            embed_warning = await _post_leaderboard_embed(
+                bot,
+                settings,
+                year=year,
+                month=month,
+                channel_tops=channel_post_tops,
+            )
+            if embed_warning is not None:
+                warnings.append(embed_warning)
 
     report_note = str(settings.database_path)
     logger.info(
@@ -399,6 +428,7 @@ async def _run_pipeline_body(
         channels_skipped=stats.channels_skipped,
         channels_failed=stats.channels_failed,
         top_entries=top_entries,
+        channel_post_tops=channel_post_tops,
         failed_channel_ids=list(stats.failed_channel_ids),
         incomplete_channel_ids=list(stats.incomplete_channel_ids),
         warnings=warnings,
