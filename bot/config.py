@@ -36,6 +36,7 @@ class Settings:
     discord_bot_token: str
     guild_id: int
     stats_channel_ids: list[int]
+    leaderboard_channel_id: int
     timezone: str = DEFAULT_TIMEZONE
     monthly_run_hour: int = DEFAULT_MONTHLY_RUN_HOUR
     monthly_run_minute: int = DEFAULT_MONTHLY_RUN_MINUTE
@@ -50,7 +51,6 @@ class Settings:
     database_path: Path = field(default_factory=lambda: Path(DEFAULT_DATABASE_PATH))
     top_n: int = DEFAULT_TOP_N
     leaderboard_channel_top_n: int = DEFAULT_LEADERBOARD_CHANNEL_TOP_N
-    leaderboard_channel_id: int | None = None
     manual_recalc_role_ids: frozenset[int] = field(default_factory=frozenset)
     scan_batch_size: int = DEFAULT_SCAN_BATCH_SIZE
     scan_progress_every: int = DEFAULT_SCAN_PROGRESS_EVERY
@@ -319,6 +319,9 @@ def get_settings() -> Settings:
         discord_bot_token=token,
         guild_id=guild_id,
         stats_channel_ids=stats_ids,
+        leaderboard_channel_id=int(
+            _require("LEADERBOARD_CHANNEL_ID", os.getenv("LEADERBOARD_CHANNEL_ID"))
+        ),
         timezone=timezone,
         monthly_run_hour=monthly_run_hour,
         monthly_run_minute=monthly_run_minute,
@@ -331,9 +334,6 @@ def get_settings() -> Settings:
         database_path=database_path,
         top_n=top_n,
         leaderboard_channel_top_n=leaderboard_channel_top_n,
-        leaderboard_channel_id=_parse_optional_int(
-            os.getenv("LEADERBOARD_CHANNEL_ID")
-        ),
         manual_recalc_role_ids=_parse_manual_recalc_role_ids(),
         scan_batch_size=scan_batch_size,
         scan_progress_every=scan_progress_every,

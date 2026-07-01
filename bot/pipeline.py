@@ -96,6 +96,7 @@ class PipelineResult:
     failed_channel_ids: list[int] = field(default_factory=list)
     incomplete_channel_ids: list[int] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    embed_posted: bool = False
 
 
 def _embed_channel_error(channel_id: int, exc: Exception) -> str:
@@ -370,15 +371,6 @@ async def _run_pipeline_body(
             )
         )
 
-    if assign_roles:
-        if bot is None:
-            raise ValueError("assign_roles=True requires a running bot instance")
-        await role_service.run_rofler_role_reassignment(
-            bot,
-            year=year,
-            month=month,
-        )
-
     channel_post_tops: list[NamedChannelTop] = []
     try:
         settings.validate_leaderboard_post_channel_settings()
@@ -389,6 +381,7 @@ async def _run_pipeline_body(
         pass
 
     warnings: list[str] = []
+    embed_posted = False
     if post_embed:
         if bot is None:
             raise ValueError("post_embed=True requires a running bot instance")
@@ -410,6 +403,23 @@ async def _run_pipeline_body(
             )
             if embed_warning is not None:
                 warnings.append(embed_warning)
+            else:
+                embed_posted = True
+
+    if assign_roles:
+        assert bot is not None
+        try:
+            await role_service.run_rofler_role_reassignment(
+                bot,
+                year=year,
+                month=month,
+            )
+        except Exception:  # noqa: BLE001 - roles must not block commit/embed
+            logger.exception(
+                "Role reassignment failed for %s-%02d after successful scan.",
+                year,
+                month,
+            )
 
     report_note = str(settings.database_path)
     logger.info(
@@ -432,6 +442,7 @@ async def _run_pipeline_body(
         failed_channel_ids=list(stats.failed_channel_ids),
         incomplete_channel_ids=list(stats.incomplete_channel_ids),
         warnings=warnings,
+        embed_posted=embed_posted,
     )
 
 

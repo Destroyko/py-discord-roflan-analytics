@@ -21,6 +21,7 @@ def _settings(**kwargs) -> Settings:
         discord_bot_token="t",
         guild_id=1,
         stats_channel_ids=[111],
+        leaderboard_channel_id=3333,
     )
     base.update(kwargs)
     return Settings(**base)
@@ -182,6 +183,12 @@ def _audit_harness(settings: Settings, *, bot_above_rofler: bool):
         send_messages=True,
         embed_links=True,
     )
+    leaderboard_channel = MagicMock(spec=discord.TextChannel)
+    leaderboard_channel.permissions_for.return_value = discord.Permissions(
+        view_channel=True,
+        send_messages=True,
+        embed_links=True,
+    )
 
     def get_channel(channel_id: int):
         return {
@@ -189,6 +196,7 @@ def _audit_harness(settings: Settings, *, bot_above_rofler: bool):
             222: stats_channel,
             8001: notify_channel,
             8002: error_channel,
+            settings.leaderboard_channel_id: leaderboard_channel,
         }.get(channel_id)
 
     guild = MagicMock()

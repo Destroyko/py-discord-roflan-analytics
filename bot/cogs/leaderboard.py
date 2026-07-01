@@ -10,8 +10,6 @@ import asyncio
 
 import time as _time
 
-from datetime import datetime
-
 
 
 import discord
@@ -25,6 +23,7 @@ from discord.ext import commands, tasks
 from bot.client import BotChannelReader
 
 from bot.config import get_settings
+from bot.database.db import Database
 
 from bot.pipeline import (
     CheckpointError,
@@ -34,6 +33,12 @@ from bot.pipeline import (
     run_pipeline,
 )
 from bot.services.daily_sync import run_daily_sync
+from bot.services.monthly_finalization import (
+    mark_period_attempted,
+    mark_period_finalized,
+    pending_finalization_period,
+    should_resume_period,
+)
 
 from bot.services.channel_top_service import (
     format_last_sync_footer,
@@ -55,11 +60,6 @@ from bot.services.scanner import ScanProgressCallback, ScanProgressEvent
 from bot.utils.dates import (
     current_calendar_month,
     daily_sync_time_of_day,
-    get_tz,
-    monthly_run_time_of_day,
-    next_daily_sync_at,
-    next_monthly_run_at,
-    previous_calendar_month,
 )
 
 from bot.utils.logger import get_logger
@@ -175,6 +175,7 @@ class LeaderboardCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
 
         self.bot = bot
+        self._monthly_lock = asyncio.Lock()
 
 
 
@@ -184,9 +185,11 @@ class LeaderboardCog(commands.Cog):
 
             self.daily_channel_sync.start()
 
-        if not self.monthly_leaderboard.is_running():
+        if not self.monthly_finalization_watchdog.is_running():
 
-            self.monthly_leaderboard.start()
+            self.monthly_finalization_watchdog.start()
+
+        await self._startup_monthly_catchup()
 
 
 
@@ -194,7 +197,7 @@ class LeaderboardCog(commands.Cog):
 
         self.daily_channel_sync.cancel()
 
-        self.monthly_leaderboard.cancel()
+        self.monthly_finalization_watchdog.cancel()
 
 
 
@@ -289,6 +292,14 @@ class LeaderboardCog(commands.Cog):
             )
 
             await self._report_recalculate_success(interaction, year, month, result)
+
+            if post_results and result.embed_posted:
+                settings = get_settings()
+                async with Database(settings.database_path) as db:
+                    await db.init_db()
+                    await mark_period_finalized(
+                        db, settings, year, month, result.run_id
+                    )
 
         except ScanFailedError as exc:
 
@@ -503,6 +514,264 @@ class LeaderboardCog(commands.Cog):
 
 
 
+    async def _startup_monthly_catchup(self) -> None:
+
+        await self.bot.wait_until_ready()
+
+        await self._maybe_run_monthly_finalization(reason="catch-up")
+
+
+
+    async def _maybe_run_monthly_finalization(self, *, reason: str) -> None:
+
+        if self._monthly_lock.locked():
+
+            return
+
+        settings = get_settings()
+
+        async with Database(settings.database_path) as db:
+
+            await db.init_db()
+
+            period = await pending_finalization_period(db, settings)
+
+        if period is None:
+
+            return
+
+        year, month = period
+
+        async with self._monthly_lock:
+
+            async with Database(settings.database_path) as db:
+
+                await db.init_db()
+
+                period = await pending_finalization_period(db, settings)
+
+            if period is None:
+
+                return
+
+            year, month = period
+
+            logger.info(
+
+                "Monthly finalization %s: recalculating %s-%02d",
+
+                reason,
+
+                year,
+
+                month,
+
+            )
+
+            await self._run_monthly_finalization(year, month)
+
+
+
+    async def _run_monthly_finalization(self, year: int, month: int) -> None:
+
+        settings = get_settings()
+
+        try:
+
+            settings.validate_leaderboard_post_channel_settings()
+
+        except ValueError as exc:
+
+            logger.error(
+
+                "Monthly finalization %s-%02d: invalid embed config: %s",
+
+                year,
+
+                month,
+
+                exc,
+
+            )
+
+            async with Database(settings.database_path) as db:
+
+                await db.init_db()
+
+                await mark_period_attempted(
+
+                    db, settings, year, month, None, embed_posted=False
+
+                )
+
+            return
+
+        reader = BotChannelReader(self.bot)
+
+        resume = should_resume_period(settings, year, month)
+
+        try:
+
+            result = await run_pipeline(
+
+                year,
+
+                month,
+
+                reader=reader,
+
+                post_embed=True,
+
+                assign_roles=settings.role_reassign_enabled,
+
+                bot=self.bot,
+
+                print_top=False,
+
+                resume=resume,
+
+            )
+
+        except ScanFailedError as exc:
+
+            logger.warning("Monthly finalization did not commit: %s", exc)
+
+            async with Database(settings.database_path) as db:
+
+                await db.init_db()
+
+                await mark_period_attempted(
+
+                    db,
+
+                    settings,
+
+                    year,
+
+                    month,
+
+                    exc.stats.run_id,
+
+                    embed_posted=False,
+
+                )
+
+            await self._notify_failure(
+
+                f"Monthly leaderboard for {year}-{month:02d} did not finish: "
+
+                f"failed {exc.stats.failed_channel_ids or '-'}, "
+
+                f"incomplete {exc.stats.incomplete_channel_ids or '-'}. "
+
+                "Database was not updated."
+
+            )
+
+            return
+
+        except Exception as exc:  # noqa: BLE001 - keep watchdog alive
+
+            logger.exception("Monthly finalization failed for %s-%02d.", year, month)
+
+            if should_resume_period(settings, year, month):
+
+                logger.info(
+
+                    "Monthly finalization %s-%02d: checkpoint kept for resume.",
+
+                    year,
+
+                    month,
+
+                )
+
+                return
+
+            async with Database(settings.database_path) as db:
+
+                await db.init_db()
+
+                await mark_period_attempted(
+
+                    db, settings, year, month, None, embed_posted=False
+
+                )
+
+            await self._notify_failure(
+
+                f"Monthly leaderboard for {year}-{month:02d} crashed: {exc}"
+
+            )
+
+            return
+
+        async with Database(settings.database_path) as db:
+
+            await db.init_db()
+
+            if result.embed_posted:
+
+                await mark_period_finalized(
+
+                    db, settings, year, month, result.run_id
+
+                )
+
+            else:
+
+                logger.error(
+
+                    "Monthly finalization %s-%02d: scan committed but embed "
+
+                    "was not posted.",
+
+                    year,
+
+                    month,
+
+                )
+
+                await mark_period_attempted(
+
+                    db,
+
+                    settings,
+
+                    year,
+
+                    month,
+
+                    result.run_id,
+
+                    embed_posted=False,
+
+                )
+
+
+
+    async def _notify_failure(self, message: str) -> None:
+
+        channel_id = get_settings().leaderboard_channel_id
+
+        try:
+
+            channel = await self.bot.fetch_channel(channel_id)
+
+            if isinstance(channel, discord.TextChannel):
+
+                await channel.send(message)
+
+        except discord.HTTPException:
+
+            logger.exception(
+
+                "Failed to post failure notice to channel %s.", channel_id
+
+            )
+
+
+
     @tasks.loop(time=daily_sync_time_of_day())
 
     async def daily_channel_sync(self) -> None:
@@ -543,145 +812,21 @@ class LeaderboardCog(commands.Cog):
 
         await self.bot.wait_until_ready()
 
-        target = next_daily_sync_at()
 
-        now = datetime.now(tz=get_tz())
 
-        delay = (target - now).total_seconds()
+    @tasks.loop(minutes=5.0)
 
-        logger.info(
+    async def monthly_finalization_watchdog(self) -> None:
 
-            "Next daily channel sync at %s (sleep %.0fs).",
-
-            target.isoformat(),
-
-            max(delay, 0),
-
-        )
-
-        if delay > 0:
-
-            await asyncio.sleep(delay)
+        await self._maybe_run_monthly_finalization(reason="watchdog")
 
 
 
-    @tasks.loop(time=monthly_run_time_of_day())
+    @monthly_finalization_watchdog.before_loop
 
-    async def monthly_leaderboard(self) -> None:
-
-        now = datetime.now(tz=get_tz())
-
-        if now.day != 1:
-
-            return
-
-
-
-        year, month = previous_calendar_month()
-
-        logger.info("Monthly job: recalculating %s-%02d", year, month)
-
-        settings = get_settings()
-
-        reader = BotChannelReader(self.bot)
-
-        try:
-
-            await run_pipeline(
-
-                year,
-
-                month,
-
-                reader=reader,
-
-                post_embed=True,
-
-                assign_roles=settings.role_reassign_enabled,
-
-                bot=self.bot,
-
-                print_top=False,
-
-            )
-
-        except ScanFailedError as exc:
-
-            logger.warning("Monthly job did not commit: %s", exc)
-
-            await self._notify_failure(
-
-                f"Monthly leaderboard for {year}-{month:02d} did not finish: "
-
-                f"failed {exc.stats.failed_channel_ids or '-'}, "
-
-                f"incomplete {exc.stats.incomplete_channel_ids or '-'}. "
-
-                "Database was not updated."
-
-            )
-
-        except Exception as exc:  # noqa: BLE001 - keep the loop alive
-
-            logger.exception("Monthly job failed.")
-
-            await self._notify_failure(
-
-                f"Monthly leaderboard for {year}-{month:02d} crashed: {exc}"
-
-            )
-
-
-
-    async def _notify_failure(self, message: str) -> None:
-
-        channel_id = get_settings().leaderboard_channel_id
-
-        if channel_id is None:
-
-            return
-
-        try:
-
-            channel = await self.bot.fetch_channel(channel_id)
-
-            if isinstance(channel, discord.TextChannel):
-
-                await channel.send(message)
-
-        except discord.HTTPException:
-
-            logger.exception("Failed to post failure notice to channel %s.", channel_id)
-
-
-
-    @monthly_leaderboard.before_loop
-
-    async def _before_monthly(self) -> None:
+    async def _before_monthly_watchdog(self) -> None:
 
         await self.bot.wait_until_ready()
-
-        target = next_monthly_run_at()
-
-        now = datetime.now(tz=get_tz())
-
-        delay = (target - now).total_seconds()
-
-        logger.info(
-
-            "Next monthly leaderboard at %s (sleep %.0fs).",
-
-            target.isoformat(),
-
-            max(delay, 0),
-
-        )
-
-        if delay > 0:
-
-            await asyncio.sleep(delay)
-
-
 
 
 

@@ -483,6 +483,84 @@ class Database:
             await self.connection.rollback()
             raise
 
+    async def is_month_finalized(
+        self, guild_id: str, year: int, month: int
+    ) -> bool:
+        cursor = await self.connection.execute(
+            """
+            SELECT 1 FROM monthly_finalizations
+            WHERE guild_id = ? AND year = ? AND month = ? AND embed_posted = 1
+            """,
+            (guild_id, year, month),
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        return row is not None
+
+    async def is_month_attempted(
+        self, guild_id: str, year: int, month: int
+    ) -> bool:
+        cursor = await self.connection.execute(
+            """
+            SELECT 1 FROM monthly_finalizations
+            WHERE guild_id = ? AND year = ? AND month = ?
+            """,
+            (guild_id, year, month),
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        return row is not None
+
+    async def mark_month_attempted(
+        self,
+        guild_id: str,
+        year: int,
+        month: int,
+        run_id: str | None,
+        *,
+        embed_posted: bool,
+        attempted_at: str,
+    ) -> None:
+        await self.connection.execute(
+            """
+            INSERT INTO monthly_finalizations (
+                guild_id, year, month, attempted_at, run_id, embed_posted
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, year, month) DO UPDATE SET
+                attempted_at = excluded.attempted_at,
+                run_id = excluded.run_id,
+                embed_posted = excluded.embed_posted
+            """,
+            (guild_id, year, month, attempted_at, run_id, int(embed_posted)),
+        )
+        await self.connection.commit()
+
+    async def mark_month_finalized(
+        self,
+        guild_id: str,
+        year: int,
+        month: int,
+        run_id: str,
+        *,
+        attempted_at: str,
+        finalized_at: str,
+    ) -> None:
+        await self.connection.execute(
+            """
+            INSERT INTO monthly_finalizations (
+                guild_id, year, month, attempted_at, finalized_at,
+                run_id, embed_posted
+            ) VALUES (?, ?, ?, ?, ?, ?, 1)
+            ON CONFLICT(guild_id, year, month) DO UPDATE SET
+                attempted_at = excluded.attempted_at,
+                finalized_at = excluded.finalized_at,
+                run_id = excluded.run_id,
+                embed_posted = 1
+            """,
+            (guild_id, year, month, attempted_at, finalized_at, run_id),
+        )
+        await self.connection.commit()
+
 
 def message_rows_from(items: Iterable[MessageRow]) -> list[MessageRow]:
     """Convenience helper to materialize an iterable of rows."""

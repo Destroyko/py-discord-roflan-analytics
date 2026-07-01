@@ -17,6 +17,7 @@ def build_settings(tmp_path: Path, **overrides) -> Settings:
         discord_bot_token="test-token",
         guild_id=1000,
         stats_channel_ids=[111, 222],
+        leaderboard_channel_id=3333,
         emoji_names=frozenset({"EBALO"}),
         database_path=tmp_path / "leaderboard.db",
         scan_checkpoint_dir=tmp_path / "checkpoints",
@@ -73,6 +74,7 @@ def env_settings(monkeypatch, tmp_path):
     monkeypatch.setenv("SCAN_STRICT_CHANNELS", "true")
     monkeypatch.setenv("DAILY_SYNC_MESSAGE_DELAY_SEC", "0")
     monkeypatch.setenv("LEADERBOARD_EMOJIS", "EBALO")
+    monkeypatch.setenv("LEADERBOARD_CHANNEL_ID", "3333")
     get_settings.cache_clear()
     yield get_settings()
     get_settings.cache_clear()

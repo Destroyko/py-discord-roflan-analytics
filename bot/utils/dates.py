@@ -126,6 +126,26 @@ def next_daily_sync_at(
     return candidate
 
 
+def finalization_deadline(now: datetime | None = None) -> datetime:
+    """1st of the current calendar month at configured monthly run time (leaderboard TZ)."""
+    settings = get_settings()
+    tz = get_tz()
+    if now is None:
+        now = datetime.now(tz=tz)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=tz)
+    else:
+        now = now.astimezone(tz)
+    return datetime(
+        now.year,
+        now.month,
+        1,
+        settings.monthly_run_hour,
+        settings.monthly_run_minute,
+        tzinfo=tz,
+    )
+
+
 def next_monthly_run_at(
     *,
     day: int = 1,

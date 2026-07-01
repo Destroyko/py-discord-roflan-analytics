@@ -40,3 +40,15 @@ CREATE TABLE IF NOT EXISTS rofler_role_holders (
 
 CREATE INDEX IF NOT EXISTS idx_rofler_holders_guild
     ON rofler_role_holders (guild_id);
+
+-- Monthly auto-finalization: one attempt per period; finalized when embed posted.
+CREATE TABLE IF NOT EXISTS monthly_finalizations (
+    guild_id TEXT NOT NULL,
+    year INTEGER NOT NULL,
+    month INTEGER NOT NULL,
+    attempted_at TIMESTAMP NOT NULL,
+    finalized_at TIMESTAMP,
+    run_id TEXT,
+    embed_posted INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id, year, month)
+);
