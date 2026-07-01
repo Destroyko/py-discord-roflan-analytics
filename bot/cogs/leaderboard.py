@@ -176,6 +176,7 @@ class LeaderboardCog(commands.Cog):
 
         self.bot = bot
         self._monthly_lock = asyncio.Lock()
+        self._catchup_task: asyncio.Task[None] | None = None
 
 
 
@@ -189,7 +190,12 @@ class LeaderboardCog(commands.Cog):
 
             self.monthly_finalization_watchdog.start()
 
-        await self._startup_monthly_catchup()
+        # Must not await wait_until_ready here — cog_load runs inside setup_hook
+        # before the gateway connects (discord.py deadlock otherwise).
+        self._catchup_task = asyncio.create_task(
+            self._startup_monthly_catchup(),
+            name="monthly-catchup",
+        )
 
 
 
@@ -198,6 +204,14 @@ class LeaderboardCog(commands.Cog):
         self.daily_channel_sync.cancel()
 
         self.monthly_finalization_watchdog.cancel()
+
+        if self._catchup_task is not None:
+            self._catchup_task.cancel()
+            try:
+                await self._catchup_task
+            except asyncio.CancelledError:
+                pass
+            self._catchup_task = None
 
 
 
@@ -516,9 +530,13 @@ class LeaderboardCog(commands.Cog):
 
     async def _startup_monthly_catchup(self) -> None:
 
-        await self.bot.wait_until_ready()
-
-        await self._maybe_run_monthly_finalization(reason="catch-up")
+        try:
+            await self.bot.wait_until_ready()
+            await self._maybe_run_monthly_finalization(reason="catch-up")
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - background task must not die silently
+            logger.exception("Monthly finalization catch-up failed.")
 
 
 

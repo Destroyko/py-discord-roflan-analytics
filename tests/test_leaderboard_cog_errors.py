@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
@@ -88,6 +89,31 @@ async def test_startup_catchup_delegates_to_maybe_run(cogmod, cog, monkeypatch):
 
     cog.bot.wait_until_ready.assert_awaited_once()
     maybe.assert_awaited_once_with(reason="catch-up")
+
+
+async def test_cog_load_schedules_catchup_without_blocking(cogmod, monkeypatch):
+    cog = cogmod.LeaderboardCog(bot=MagicMock())
+    scheduled: list[asyncio.Task[None]] = []
+    real_create_task = asyncio.create_task
+
+    def spy_create_task(coro, *, name=None):
+        task = real_create_task(coro, name=name)
+        scheduled.append(task)
+        return task
+
+    monkeypatch.setattr(cogmod.asyncio, "create_task", spy_create_task)
+    monkeypatch.setattr(cog.daily_channel_sync, "is_running", lambda: True)
+    monkeypatch.setattr(
+        cog.monthly_finalization_watchdog, "is_running", lambda: True
+    )
+
+    await asyncio.wait_for(cog.cog_load(), timeout=1.0)
+
+    assert len(scheduled) == 1
+    assert scheduled[0].get_name() == "monthly-catchup"
+    scheduled[0].cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await scheduled[0]
 
 
 async def test_catchup_runs_pending_period_after_deadline(cogmod, cog, monkeypatch):
