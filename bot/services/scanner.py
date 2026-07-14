@@ -62,9 +62,7 @@ class ScanStats:
         """
         if self.channels_failed or self.channels_incomplete:
             return False
-        return (
-            self.channels_completed + self.channels_skipped == self.channels_total
-        )
+        return self.channels_completed + self.channels_skipped == self.channels_total
 
 
 @dataclass
@@ -74,11 +72,35 @@ class _ChannelScanResult:
     incomplete: bool
 
 
-def _reaction_emoji_name(reaction: discord.Reaction) -> str | None:
+def _reaction_emoji_guild_id(reaction: discord.Reaction) -> str | None:
+    """Return the source guild ID for a custom reaction emoji when known."""
+    emoji = reaction.emoji
+    guild_id = getattr(emoji, "guild_id", None)
+    if guild_id is not None:
+        return str(guild_id)
+
+    guild = getattr(emoji, "guild", None)
+    guild_id = getattr(guild, "id", None)
+    if guild_id is not None:
+        return str(guild_id)
+
+    return None
+
+
+def _reaction_emoji_name(
+    reaction: discord.Reaction, *, guild_id_str: str | None
+) -> str | None:
     emoji = reaction.emoji
     name = getattr(emoji, "name", None)
     if name is None and isinstance(emoji, str):
         return emoji
+
+    if name is None:
+        return None
+
+    if guild_id_str is not None and _reaction_emoji_guild_id(reaction) != guild_id_str:
+        return None
+
     return name
 
 
@@ -95,7 +117,9 @@ def message_row_if_tracked(
         return None
     if str(message.author.id) in excluded_user_ids:
         return None
-    reaction_count = count_emoji_reactions(message.reactions, emoji_names)
+    reaction_count = count_emoji_reactions(
+        message.reactions, emoji_names, guild_id_str=guild_id_str
+    )
     if reaction_count == 0:
         return None
     channel_id = getattr(message.channel, "id", None)
@@ -113,16 +137,22 @@ def message_row_if_tracked(
 
 
 def count_emoji_reactions(
-    reactions: list[discord.Reaction], emoji_names: frozenset[str]
+    reactions: list[discord.Reaction],
+    emoji_names: frozenset[str],
+    *,
+    guild_id_str: str | None = None,
 ) -> int:
-    """Sum reaction counts for all configured emojis on one message.
+    """Sum configured reaction counts for emojis belonging to this guild.
 
-    If both :EBALO: and :ROFL: are configured and present, counts are added
-    (e.g. 5 + 6 = 11). Other reactions are ignored.
+    If both :EBALO: and :ROFL: are configured and present from ``guild_id_str``,
+    counts are added (e.g. 5 + 6 = 11). Same-name custom emojis from other
+    guilds are ignored so Nitro/server-crossposted reactions cannot inflate the
+    leaderboard. When ``guild_id_str`` is omitted, the helper keeps its legacy
+    name-only behavior for direct tests/tools.
     """
     total = 0
     for reaction in reactions:
-        name = _reaction_emoji_name(reaction)
+        name = _reaction_emoji_name(reaction, guild_id_str=guild_id_str)
         if name is not None and name in emoji_names:
             total += reaction.count
     return total
@@ -167,10 +197,14 @@ async def scan_channels(
             if settings.scan_strict_channels:
                 state.status = "failed"
                 state.error = "channel unavailable (strict mode)"
-                logger.error("Channel %s unavailable; strict mode → failed.", channel_id)
+                logger.error(
+                    "Channel %s unavailable; strict mode → failed.", channel_id
+                )
             else:
                 state.status = "skipped"
-                logger.warning("Channel %s unavailable; skipped (non-strict).", channel_id)
+                logger.warning(
+                    "Channel %s unavailable; skipped (non-strict).", channel_id
+                )
             save_checkpoint(settings, checkpoint)
             continue
 
@@ -310,7 +344,10 @@ async def _scan_single_channel(
             await db.upsert_messages_staging(batch, run_id)
             batch.clear()
 
-        if on_progress is not None and messages_seen % settings.scan_progress_every == 0:
+        if (
+            on_progress is not None
+            and messages_seen % settings.scan_progress_every == 0
+        ):
             await on_progress(
                 ScanProgressEvent(
                     channel_index=channel_index,
