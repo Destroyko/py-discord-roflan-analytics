@@ -13,7 +13,9 @@ from types import SimpleNamespace
 import discord
 
 
-def make_http_exception(status: int, *, retry_after: float | None = None) -> discord.HTTPException:
+def make_http_exception(
+    status: int, *, retry_after: float | None = None
+) -> discord.HTTPException:
     """Build a ``discord.HTTPException`` with a given HTTP status for tests."""
     response = SimpleNamespace(status=status, reason="test-error")
     exc = discord.HTTPException(response, f"HTTP {status}")
@@ -25,8 +27,8 @@ def make_http_exception(status: int, *, retry_after: float | None = None) -> dis
 class FakeReaction:
     """Minimal stand-in for ``discord.Reaction``."""
 
-    def __init__(self, name: str, count: int) -> None:
-        self.emoji = SimpleNamespace(name=name)
+    def __init__(self, name: str, count: int, *, guild_id: int | None = 1000) -> None:
+        self.emoji = SimpleNamespace(name=name, guild_id=guild_id)
         self.count = count
 
 
@@ -47,7 +49,9 @@ class FakeMessage:
         self.id = message_id
         self.author = SimpleNamespace(id=author_id, bot=bot)
         self.reactions = reactions or []
-        self.created_at = created_at or datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
+        self.created_at = created_at or datetime(
+            2026, 1, 15, 12, 0, tzinfo=timezone.utc
+        )
         self._system = system
         self.channel = SimpleNamespace(id=channel_id or 0)
 
