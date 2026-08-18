@@ -80,23 +80,22 @@ def load_checkpoint(
         return None
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
+        channels = {
+            cid: ChannelScanState(**state)
+            for cid, state in (raw.get("channels") or {}).items()
+        }
+        return ScanCheckpoint(
+            run_id=raw["run_id"],
+            guild_id=int(raw["guild_id"]),
+            year=int(raw["year"]),
+            month=int(raw["month"]),
+            phase=raw.get("phase", "scanning"),
+            locked_at=raw.get("locked_at", ""),
+            channels=channels,
+        )
+    except (json.JSONDecodeError, OSError, KeyError, TypeError, ValueError) as exc:
         logger.warning("Failed to read checkpoint %s: %s; ignoring.", path, exc)
         return None
-
-    channels = {
-        cid: ChannelScanState(**state)
-        for cid, state in (raw.get("channels") or {}).items()
-    }
-    return ScanCheckpoint(
-        run_id=raw["run_id"],
-        guild_id=int(raw["guild_id"]),
-        year=int(raw["year"]),
-        month=int(raw["month"]),
-        phase=raw.get("phase", "scanning"),
-        locked_at=raw.get("locked_at", ""),
-        channels=channels,
-    )
 
 
 def _checkpoint_payload(checkpoint: ScanCheckpoint) -> dict:

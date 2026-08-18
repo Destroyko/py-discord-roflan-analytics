@@ -177,6 +177,7 @@ class LeaderboardCog(commands.Cog):
         self.bot = bot
         self._monthly_lock = asyncio.Lock()
         self._catchup_task: asyncio.Task[None] | None = None
+        self._watchdog_last_notified_error: str | None = None
 
 
 
@@ -836,7 +837,24 @@ class LeaderboardCog(commands.Cog):
 
     async def monthly_finalization_watchdog(self) -> None:
 
-        await self._maybe_run_monthly_finalization(reason="watchdog")
+        try:
+
+            await self._maybe_run_monthly_finalization(reason="watchdog")
+
+        except Exception as exc:  # noqa: BLE001 - loop must not die silently
+
+            logger.exception("Monthly finalization watchdog tick failed.")
+
+            error_text = str(exc)
+            if error_text != self._watchdog_last_notified_error:
+                self._watchdog_last_notified_error = error_text
+                await self._notify_failure(
+                    f"Monthly finalization watchdog crashed: {exc}"
+                )
+
+        else:
+
+            self._watchdog_last_notified_error = None
 
 
 

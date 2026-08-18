@@ -173,7 +173,6 @@ async def _post_leaderboard_embed(
         description=description,
         colour=discord.Colour.blue(),
     )
-    embed.set_footer(text="Источник: SQLite")
     try:
         await channel.send(embed=embed)
     except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
