@@ -91,23 +91,26 @@ def format_named_channel_tops_embed(
     tz_label: str,
     emoji_names: frozenset[str],
     top_n: int,
+    include_header: bool = True,
 ) -> str:
     """Render per-channel TOP blocks for a Discord embed description."""
-    header = (
-        f"**Рейтинг {year}-{month:02d}** ({tz_label})\n"
-        f"Эмодзи {format_emoji_label(emoji_names)} · топ {top_n} по каналу"
-    )
-    blocks = [header]
+    blocks: list[str] = []
+    if include_header:
+        blocks.append(
+            f"**Рейтинг {year}-{month:02d}** ({tz_label})\n"
+            f"Эмодзи {format_emoji_label(emoji_names)} · топ {top_n} по каналу"
+        )
     empty = "_За этот период реакций не найдено._"
     for section in channel_tops:
-        blocks.append("")
+        if blocks:
+            blocks.append("")
         blocks.append(f"**{section.title}** (<#{section.channel_id}>)")
         if not section.entries:
             blocks.append(empty)
             continue
         for entry in section.entries[:top_n]:
             blocks.append(
-                f"**{entry.rank}.** <@{entry.author_id}> — "
+                f"**{entry.rank}.** <@{entry.author_id}> - "
                 f"{entry.total_reactions} реакций"
             )
     text = "\n".join(blocks)
@@ -253,12 +256,12 @@ async def load_channel_last_scanned_for_period(
 
 
 def format_last_sync_footer(last_scanned_db: str | None) -> str:
-    """Embed footer: SQLite source + last Discord sync time in local TZ."""
+    """Embed footer: last Discord sync time in local TZ."""
     local_time = format_db_timestamp_local(last_scanned_db)
     if local_time is None:
-        return "Из SQLite · синхронизация с Discord не выполнялась"
+        return "синхронизация с Discord не выполнялась"
     tz_label = local_timezone_short_label()
-    return f"Из SQLite · синхронизация: {local_time} ({tz_label})"
+    return f"синхронизация: {local_time} ({tz_label})"
 
 
 def format_console_channel_tops(

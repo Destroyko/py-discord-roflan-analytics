@@ -94,11 +94,14 @@ def test_format_last_sync_footer_msk(env_settings):
     assert "17.06.2026" in text
     assert "МСК" in text
     assert "синхронизация:" in text
+    assert "Из SQLite" not in text
 
 
 def test_format_last_sync_footer_missing(env_settings):
     _ = env_settings
-    assert "не выполнялась" in format_last_sync_footer(None)
+    text = format_last_sync_footer(None)
+    assert "не выполнялась" in text
+    assert "Из SQLite" not in text
 
 
 async def test_load_channel_leaderboard_rejects_unknown_channel(env_settings):
@@ -157,6 +160,8 @@ def test_format_embed_includes_channel_label():
     )
     assert "#general" in text
     assert "топ 5" in text
+    assert " - " in text
+    assert "—" not in text
 
 
 def test_format_embed_omits_header_when_requested():

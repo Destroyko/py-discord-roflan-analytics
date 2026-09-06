@@ -364,6 +364,10 @@ async def test_show_leaderboard_covers_both_channels(cogmod, cog, env_settings):
     assert "Рофлинкичи" in embed.description
     assert "<@10>" in embed.description
     assert "<@20>" in embed.description
+    assert "-" in embed.description
+    assert "—" not in embed.description
+    assert "Рейтинг" not in embed.description
+    assert "Из SQLite" not in embed.footer.text
 
 
 async def test_show_leaderboard_missing_channel_config(cogmod, env_settings):

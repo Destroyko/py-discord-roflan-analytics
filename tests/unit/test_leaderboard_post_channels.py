@@ -67,6 +67,33 @@ def test_format_named_channel_tops_embed_lists_both_sections():
     assert "<#222>" in text
     assert "<@10>" in text
     assert "топ 5 по каналу" in text
+    assert " - " in text
+    assert "—" not in text
+
+
+def test_format_named_channel_tops_embed_can_omit_header():
+    tops = [
+        NamedChannelTop(
+            title="Дуркичи",
+            channel_id=111,
+            entries=[
+                LeaderboardEntry(rank=1, author_id="10", total_reactions=7),
+            ],
+        ),
+    ]
+    text = format_named_channel_tops_embed(
+        tops,
+        year=2026,
+        month=5,
+        tz_label="Europe/Moscow",
+        emoji_names=frozenset({"EBALO"}),
+        top_n=5,
+        include_header=False,
+    )
+    assert "Рейтинг" not in text
+    assert "топ 5 по каналу" not in text
+    assert not text.startswith("\n")
+    assert "Дуркичи" in text
 
 
 def test_format_named_channel_tops_console():

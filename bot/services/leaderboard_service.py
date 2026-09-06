@@ -135,7 +135,7 @@ def format_embed_description(
         )
     for entry in entries[:top_n]:
         lines.append(
-            f"**{entry.rank}.** <@{entry.author_id}> — "
+            f"**{entry.rank}.** <@{entry.author_id}> - "
             f"{entry.total_reactions} реакций"
         )
     text = "\n".join(lines)

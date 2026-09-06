@@ -401,6 +401,8 @@ class LeaderboardCog(commands.Cog):
 
                 top_n=settings.leaderboard_channel_top_n,
 
+                include_header=False,
+
             )
 
             embed = discord.Embed(
