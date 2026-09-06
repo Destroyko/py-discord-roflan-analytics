@@ -30,8 +30,15 @@ def build_settings(tmp_path: Path, **overrides) -> Settings:
 
 
 @pytest.fixture(autouse=True)
-def _clear_settings_cache():
-    """Keep the ``get_settings`` lru_cache from leaking between tests."""
+def _clear_settings_cache(monkeypatch):
+    """Keep the ``get_settings`` lru_cache from leaking between tests.
+
+    Also stops ``get_settings()`` from calling the real ``load_dotenv()`` — a
+    stray ``.env``/``env`` file on a dev machine must never leak into a test's
+    "this variable is unset" assumptions. Tests opt into specific env vars via
+    ``monkeypatch.setenv`` (see ``env_settings`` below) instead.
+    """
+    monkeypatch.setattr("bot.config.load_dotenv", lambda *a, **k: None)
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

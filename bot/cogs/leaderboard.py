@@ -48,13 +48,12 @@ from bot.services.channel_top_service import (
     load_leaderboard_post_channel_tops,
 )
 
-from bot.utils.dates import validate_period
-
 from bot.services.scanner import ScanProgressCallback, ScanProgressEvent
 
 from bot.utils.dates import (
     current_calendar_month,
     daily_sync_time_of_day,
+    parse_db_timestamp,
 )
 
 from bot.utils.logger import get_logger
@@ -142,6 +141,94 @@ def _make_progress_editor(
 
 
     return on_progress
+
+
+_TOO_OLD_MESSAGE = "Рофланыч не видит так далеко в прошлое."
+_FUTURE_MESSAGE = "Рофланыч не умеет смотреть в будущее."
+
+
+async def _classify_requested_period(year: int, month: int, settings) -> str:
+    """``"future"``, ``"too_old"`` or ``"ok"`` for an already-valid (year, month).
+
+    "too_old" means the period ends before the earliest message this guild has
+    ever had scanned — i.e. before the bot could possibly have data for it,
+    as opposed to a genuinely quiet month the bot was already running for.
+    """
+    cur_year, cur_month = current_calendar_month()
+    if (year, month) > (cur_year, cur_month):
+        return "future"
+    if (year, month) == (cur_year, cur_month):
+        return "ok"
+
+    async with Database(settings.database_path) as db:
+        await db.init_db()
+        earliest = await db.get_earliest_message_created_at(str(settings.guild_id))
+
+    if earliest is None:
+        return "too_old"
+
+    earliest_period = current_calendar_month(now=parse_db_timestamp(earliest))
+    if (year, month) < earliest_period:
+        return "too_old"
+    return "ok"
+
+
+async def _build_show_leaderboard_reply(
+    year: int, month: int, settings
+) -> tuple[discord.Embed | None, str | None]:
+    """Shared by the slash and ``!`` versions of ``show_leaderboard``.
+
+    Returns ``(embed, None)`` or ``(None, content)`` — exactly one is set.
+    """
+    period_status = await _classify_requested_period(year, month, settings)
+    if period_status == "future":
+        return (
+            discord.Embed(description=_FUTURE_MESSAGE, colour=discord.Colour.orange()),
+            None,
+        )
+    if period_status == "too_old":
+        return (
+            discord.Embed(description=_TOO_OLD_MESSAGE, colour=discord.Colour.orange()),
+            None,
+        )
+
+    try:
+        settings.validate_leaderboard_post_channel_settings()
+    except ValueError as exc:
+        return None, f"TOP недоступен: {exc}"
+
+    try:
+        channel_tops = await load_leaderboard_post_channel_tops(
+            year, month, settings=settings
+        )
+        last_scanned_values = [
+            await load_channel_last_scanned_for_period(year, month, top.channel_id)
+            for top in channel_tops
+        ]
+        last_scanned = (
+            None
+            if any(v is None for v in last_scanned_values)
+            else min(last_scanned_values)
+        )
+        description = format_named_channel_tops_embed(
+            channel_tops,
+            year=year,
+            month=month,
+            tz_label=settings.timezone,
+            emoji_names=settings.emoji_names,
+            top_n=settings.leaderboard_channel_top_n,
+            include_header=False,
+        )
+        embed = discord.Embed(
+            title=f"Рейтинг {year}-{month:02d}",
+            description=description,
+            colour=discord.Colour.green(),
+        )
+        embed.set_footer(text=format_last_sync_footer(last_scanned))
+        return embed, None
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("show_leaderboard failed.")
+        return None, f"Не удалось загрузить рейтинг: {exc}"
 
 
 def _format_scan_failed_message(
@@ -329,8 +416,8 @@ class LeaderboardCog(commands.Cog):
         description="TOP по дурке и рофлинкам за месяц (из SQLite, без скана).",
     )
     @app_commands.describe(
-        year="Год, например 2026",
-        month="Месяц 1–12",
+        year="Год (по умолчанию текущий)",
+        month="Месяц 1–12 (по умолчанию текущий)",
     )
 
     async def show_leaderboard(
@@ -339,93 +426,31 @@ class LeaderboardCog(commands.Cog):
 
         interaction: discord.Interaction,
 
-        year: int,
+        year: int | None = None,
 
-        month: int,
+        month: int | None = None,
 
     ) -> None:
 
-        await interaction.response.defer(ephemeral=True)
+        cur_year, cur_month = current_calendar_month()
+        year = cur_year if year is None else year
+        month = cur_month if month is None else month
 
-        try:
+        if not 1 <= month <= 12:
 
-            validate_period(year, month)
+            # Not a real calendar month — silently ignore, like an unknown
 
-        except ValueError as exc:
-
-            await interaction.followup.send(f"Некорректные данные: {exc}", ephemeral=True)
+            # command. No defer, no message: nothing public, nothing at all.
 
             return
+
+        await interaction.response.defer(ephemeral=False)
 
         settings = get_settings()
 
-        try:
+        embed, content = await _build_show_leaderboard_reply(year, month, settings)
 
-            settings.validate_leaderboard_post_channel_settings()
-
-        except ValueError as exc:
-
-            await interaction.followup.send(f"TOP недоступен: {exc}", ephemeral=True)
-
-            return
-
-        try:
-
-            channel_tops = await load_leaderboard_post_channel_tops(
-                year, month, settings=settings
-            )
-
-            last_scanned_values = [
-                await load_channel_last_scanned_for_period(
-                    year, month, top.channel_id
-                )
-                for top in channel_tops
-            ]
-            last_scanned = (
-                None
-                if any(v is None for v in last_scanned_values)
-                else min(last_scanned_values)
-            )
-
-            description = format_named_channel_tops_embed(
-
-                channel_tops,
-
-                year=year,
-
-                month=month,
-
-                tz_label=settings.timezone,
-
-                emoji_names=settings.emoji_names,
-
-                top_n=settings.leaderboard_channel_top_n,
-
-                include_header=False,
-
-            )
-
-            embed = discord.Embed(
-
-                title=f"Рейтинг {year}-{month:02d}",
-
-                description=description,
-
-                colour=discord.Colour.green(),
-
-            )
-
-            embed.set_footer(text=format_last_sync_footer(last_scanned))
-
-            await interaction.followup.send(embed=embed, ephemeral=True)
-
-        except Exception as exc:  # noqa: BLE001
-
-            logger.exception("show_leaderboard failed.")
-
-            await interaction.followup.send(
-                f"Не удалось загрузить рейтинг: {exc}", ephemeral=True
-            )
+        await interaction.followup.send(content=content, embed=embed, ephemeral=False)
 
 
 

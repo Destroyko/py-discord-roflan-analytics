@@ -350,6 +350,22 @@ class Database:
             return None
         return str(row[0])
 
+    async def get_earliest_message_created_at(self, guild_id: str) -> str | None:
+        """Earliest ``created_at`` ever stored for this guild (UTC DB string).
+
+        ``None`` means nothing has been scanned for the guild yet. Used to tell
+        "period predates the bot" from "a genuinely quiet month".
+        """
+        cursor = await self.connection.execute(
+            "SELECT MIN(created_at) FROM messages WHERE guild_id = ?",
+            (guild_id,),
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        if row is None or row[0] is None:
+            return None
+        return str(row[0])
+
     async def get_period_audit(
         self, guild_id: str, after: str, before: str
     ) -> dict[str, object]:

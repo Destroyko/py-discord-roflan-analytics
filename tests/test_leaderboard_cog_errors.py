@@ -7,6 +7,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
 
+import discord
 import pytest
 
 from bot.database.db import Database, MessageRow
@@ -358,7 +359,9 @@ async def test_show_leaderboard_covers_both_channels(cogmod, cog, env_settings):
 
     await cog.show_leaderboard.callback(cog, interaction, 2026, 3)
 
+    interaction.response.defer.assert_awaited_once_with(ephemeral=False)
     interaction.followup.send.assert_awaited_once()
+    assert interaction.followup.send.await_args.kwargs["ephemeral"] is False
     embed = interaction.followup.send.await_args.kwargs["embed"]
     assert "Дуркичи" in embed.description
     assert "Рофлинкичи" in embed.description
@@ -370,18 +373,75 @@ async def test_show_leaderboard_covers_both_channels(cogmod, cog, env_settings):
     assert "Из SQLite" not in embed.footer.text
 
 
+async def test_show_leaderboard_future_period_is_a_joke(cogmod, cog):
+    from bot.utils.dates import current_calendar_month
+
+    interaction = _slash_interaction()
+    year, _month = current_calendar_month()
+
+    await cog.show_leaderboard.callback(cog, interaction, year + 5, 1)
+
+    interaction.followup.send.assert_awaited_once()
+    embed = interaction.followup.send.await_args.kwargs["embed"]
+    assert interaction.followup.send.await_args.kwargs["ephemeral"] is False
+    assert "будущее" in embed.description
+
+
+async def test_show_leaderboard_too_old_period_is_a_joke(cogmod, cog, env_settings):
+    """No data at all yet for the guild: any past period reads as "too old"."""
+    settings = env_settings
+    interaction = _slash_interaction()
+    async with Database(settings.database_path) as db:
+        await db.init_db()
+
+    await cog.show_leaderboard.callback(cog, interaction, 2020, 1)
+
+    interaction.followup.send.assert_awaited_once()
+    embed = interaction.followup.send.await_args.kwargs["embed"]
+    assert interaction.followup.send.await_args.kwargs["ephemeral"] is False
+    assert "прошлое" in embed.description
+
+
+async def test_show_leaderboard_invalid_month_is_silent(cogmod, cog):
+    interaction = _slash_interaction()
+
+    await cog.show_leaderboard.callback(cog, interaction, 2026, 13)
+
+    interaction.response.defer.assert_not_awaited()
+    interaction.followup.send.assert_not_awaited()
+    interaction.response.send_message.assert_not_awaited()
+
+
 async def test_show_leaderboard_missing_channel_config(cogmod, env_settings):
     """Without ROLE_DURKICHI/ROLE_ROFLINKICHI channel ids configured, bail clearly."""
+    from bot.utils.dates import current_calendar_month
+
     interaction = _slash_interaction()
     cog = cogmod.LeaderboardCog(bot=MagicMock())
+    year, month = current_calendar_month()
 
-    await cog.show_leaderboard.callback(cog, interaction, 2026, 3)
+    await cog.show_leaderboard.callback(cog, interaction, year, month)
 
     interaction.followup.send.assert_awaited_once()
     content = interaction.followup.send.await_args.kwargs.get("content") or (
         interaction.followup.send.await_args.args[0]
     )
     assert "TOP недоступен" in content
+
+
+async def test_show_leaderboard_defaults_to_current_month(cogmod, cog, monkeypatch):
+    from bot.utils.dates import current_calendar_month
+
+    interaction = _slash_interaction()
+    year, month = current_calendar_month()
+    build = AsyncMock(return_value=(MagicMock(spec=discord.Embed), None))
+    monkeypatch.setattr(cogmod, "_build_show_leaderboard_reply", build)
+
+    await cog.show_leaderboard.callback(cog, interaction, None, None)
+
+    build.assert_awaited_once()
+    called_year, called_month = build.await_args.args[0], build.await_args.args[1]
+    assert (called_year, called_month) == (year, month)
 
 
 def test_can_recalculate_with_matching_role(cogmod, make_settings, monkeypatch):
