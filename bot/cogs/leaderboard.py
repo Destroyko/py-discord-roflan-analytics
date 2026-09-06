@@ -43,14 +43,9 @@ from bot.services.monthly_finalization import (
 from bot.services.channel_top_service import (
     format_last_sync_footer,
     format_named_channel_tops_console,
+    format_named_channel_tops_embed,
     load_channel_last_scanned_for_period,
-    load_channel_leaderboard_for_period,
-)
-
-from bot.services.leaderboard_service import (
-
-    format_embed_description,
-
+    load_leaderboard_post_channel_tops,
 )
 
 from bot.utils.dates import validate_period
@@ -71,8 +66,6 @@ logger = get_logger(__name__)
 
 
 _PROGRESS_THROTTLE_SEC = 7.0
-
-_SHOW_LEADERBOARD_TOP_N = 5
 
 
 
@@ -226,7 +219,6 @@ class LeaderboardCog(commands.Cog):
         year="Год, например 2026",
         month="Месяц 1–12",
         post_results="Опубликовать TOP по дурке и рофлинкам в LEADERBOARD_CHANNEL_ID",
-        assign_roles="Перевыдать роль «Рофлер» победителям месяца",
         resume="Продолжить прерванный скан этого месяца",
     )
 
@@ -242,8 +234,6 @@ class LeaderboardCog(commands.Cog):
 
         post_results: bool = True,
 
-        assign_roles: bool = False,
-
         resume: bool = False,
 
     ) -> None:
@@ -253,20 +243,6 @@ class LeaderboardCog(commands.Cog):
             await interaction.response.send_message(
 
                 "У вас нет прав на эту команду.",
-
-                ephemeral=True,
-
-            )
-
-            return
-
-
-
-        if assign_roles and not get_settings().role_reassign_enabled:
-
-            await interaction.response.send_message(
-
-                "Перевыдача ролей отключена (`ROLE_REASSIGN_ENABLED=false`).",
 
                 ephemeral=True,
 
@@ -293,8 +269,6 @@ class LeaderboardCog(commands.Cog):
                 reader=reader,
 
                 post_embed=post_results,
-
-                assign_roles=assign_roles,
 
                 bot=self.bot,
 
@@ -352,12 +326,11 @@ class LeaderboardCog(commands.Cog):
 
         name="show_leaderboard",
 
-        description="TOP 5 за месяц по одному stats-каналу (из SQLite, без скана).",
+        description="TOP по дурке и рофлинкам за месяц (из SQLite, без скана).",
     )
     @app_commands.describe(
         year="Год, например 2026",
         month="Месяц 1–12",
-        channel="Текстовый канал из STATS_CHANNEL_IDS",
     )
 
     async def show_leaderboard(
@@ -370,8 +343,6 @@ class LeaderboardCog(commands.Cog):
 
         month: int,
 
-        channel: discord.TextChannel,
-
     ) -> None:
 
         await interaction.response.defer(ephemeral=True)
@@ -380,35 +351,45 @@ class LeaderboardCog(commands.Cog):
 
             validate_period(year, month)
 
-            settings = get_settings()
+        except ValueError as exc:
 
-            entries = await load_channel_leaderboard_for_period(
+            await interaction.followup.send(f"Некорректные данные: {exc}", ephemeral=True)
 
-                year,
+            return
 
-                month,
+        settings = get_settings()
 
-                channel.id,
+        try:
 
-                limit=_SHOW_LEADERBOARD_TOP_N,
+            settings.validate_leaderboard_post_channel_settings()
 
+        except ValueError as exc:
+
+            await interaction.followup.send(f"TOP недоступен: {exc}", ephemeral=True)
+
+            return
+
+        try:
+
+            channel_tops = await load_leaderboard_post_channel_tops(
+                year, month, settings=settings
             )
 
-            last_scanned = await load_channel_last_scanned_for_period(
-
-                year,
-
-                month,
-
-                channel.id,
-
+            last_scanned_values = [
+                await load_channel_last_scanned_for_period(
+                    year, month, top.channel_id
+                )
+                for top in channel_tops
+            ]
+            last_scanned = (
+                None
+                if any(v is None for v in last_scanned_values)
+                else min(last_scanned_values)
             )
 
-            channel_label = f"#{channel.name}"
+            description = format_named_channel_tops_embed(
 
-            description = format_embed_description(
-
-                entries,
+                channel_tops,
 
                 year=year,
 
@@ -418,15 +399,13 @@ class LeaderboardCog(commands.Cog):
 
                 emoji_names=settings.emoji_names,
 
-                top_n=_SHOW_LEADERBOARD_TOP_N,
-
-                include_header=False,
+                top_n=settings.leaderboard_channel_top_n,
 
             )
 
             embed = discord.Embed(
 
-                title=f"Рейтинг {year}-{month:02d} · {channel_label}",
+                title=f"Рейтинг {year}-{month:02d}",
 
                 description=description,
 
@@ -437,10 +416,6 @@ class LeaderboardCog(commands.Cog):
             embed.set_footer(text=format_last_sync_footer(last_scanned))
 
             await interaction.followup.send(embed=embed, ephemeral=True)
-
-        except ValueError as exc:
-
-            await interaction.followup.send(f"Некорректные данные: {exc}", ephemeral=True)
 
         except Exception as exc:  # noqa: BLE001
 
@@ -640,8 +615,6 @@ class LeaderboardCog(commands.Cog):
                 reader=reader,
 
                 post_embed=True,
-
-                assign_roles=settings.role_reassign_enabled,
 
                 bot=self.bot,
 

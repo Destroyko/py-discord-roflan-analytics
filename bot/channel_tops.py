@@ -56,7 +56,4 @@ async def run_channel_tops(
 
     if len(channel_ids) > 1:
         print()
-        print(
-            "(Guild-wide TOP across all scanned channels: `verify` or "
-            "/show_leaderboard per channel.)"
-        )
+        print("(Guild-wide TOP across all scanned channels: `verify`.)")

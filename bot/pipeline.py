@@ -1,4 +1,4 @@
-"""End-to-end run: scan to staging -> commit -> leaderboard -> optional Rofler roles.
+"""End-to-end run: scan to staging -> commit -> leaderboard -> optional embed post.
 
 Block B: scanning writes to ``messages_staging`` under a ``run_id``; the period
 in prod ``messages`` is replaced in a single transaction (`commit_scan_run`) only
@@ -17,7 +17,6 @@ from discord.ext import commands
 from bot.client import ChannelReader, create_bot_http_reader
 from bot.config import Settings, get_settings
 from bot.database.db import Database
-from bot.services import role_service
 from bot.services.channel_top_service import (
     NamedChannelTop,
     format_named_channel_tops_embed,
@@ -251,7 +250,6 @@ async def run_pipeline(
     *,
     reader: ChannelReader | None = None,
     post_embed: bool = False,
-    assign_roles: bool = False,
     bot: commands.Bot | None = None,
     print_top: bool = True,
     resume: bool = False,
@@ -271,7 +269,6 @@ async def run_pipeline(
             settings=settings,
             reader=reader,
             post_embed=post_embed,
-            assign_roles=assign_roles,
             bot=bot,
             print_top=print_top,
             resume=resume,
@@ -288,7 +285,6 @@ async def _run_pipeline_body(
     settings: Settings,
     reader: ChannelReader | None = None,
     post_embed: bool = False,
-    assign_roles: bool = False,
     bot: commands.Bot | None = None,
     print_top: bool = True,
     resume: bool = False,
@@ -404,21 +400,6 @@ async def _run_pipeline_body(
                 warnings.append(embed_warning)
             else:
                 embed_posted = True
-
-    if assign_roles:
-        assert bot is not None
-        try:
-            await role_service.run_rofler_role_reassignment(
-                bot,
-                year=year,
-                month=month,
-            )
-        except Exception:  # noqa: BLE001 - roles must not block commit/embed
-            logger.exception(
-                "Role reassignment failed for %s-%02d after successful scan.",
-                year,
-                month,
-            )
 
     report_note = str(settings.database_path)
     logger.info(

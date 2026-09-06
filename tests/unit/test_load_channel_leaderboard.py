@@ -106,6 +106,43 @@ async def test_load_channel_leaderboard_rejects_unknown_channel(env_settings):
         await load_channel_leaderboard_for_period(2026, 3, 999999)
 
 
+async def test_load_channel_leaderboard_backfills_user_check_hit(
+    env_settings, monkeypatch
+):
+    """A user the external API flags is skipped and backfilled from rank 3."""
+    settings = env_settings
+    object.__setattr__(settings, "user_check_api_url", "https://example.com/api/anti")
+
+    async def fake_is_user_flagged(session, user_id, *, settings):
+        return user_id == "u2"
+
+    monkeypatch.setattr(
+        "bot.services.user_check_service.is_user_flagged", fake_is_user_flagged
+    )
+
+    async with Database(settings.database_path) as db:
+        await db.init_db()
+        await db.upsert_messages(
+            [
+                MessageRow(
+                    message_id=f"m{i}",
+                    author_id=f"u{i}",
+                    channel_id="111",
+                    guild_id="1000",
+                    created_at="2026-03-10 12:00:00",
+                    reaction_count=100 - i,
+                    last_scanned_at="2026-03-10 12:00:00",
+                )
+                for i in range(1, 4)
+            ]
+        )
+
+    entries = await load_channel_leaderboard_for_period(2026, 3, 111, limit=2)
+
+    assert [e.author_id for e in entries] == ["u1", "u3"]
+    assert [e.rank for e in entries] == [1, 2]
+
+
 def test_format_embed_includes_channel_label():
     from bot.services.leaderboard_service import LeaderboardEntry
 

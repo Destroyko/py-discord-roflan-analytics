@@ -34,10 +34,8 @@ python3 -m venv .venv
   - `DISCORD_BOT_TOKEN`
   - `GUILD_ID`, `STATS_CHANNEL_IDS`
   - `LEADERBOARD_CHANNEL_ID` (embed и алерты при сбое monthly **скана**)
-  - `ROLE_ROFLER_ID`, `ROLE_NOTIFY_CHANNEL_ID`, `ROLE_ERROR_CHANNEL_ID`
   - `ROLE_DURKICHI_CHANNEL_ID`, `ROLE_ROFLINKICHI_CHANNEL_ID` (оба в `STATS_CHANNEL_IDS`)
   - `MANUAL_RECALC_ROLE_IDS` (роли для `/recalculate_leaderboard`; Administrator всегда может)
-  - Права бота: **Manage Roles**, роль бота выше «Рофлер»
 - [ ] Каталоги для данных существуют и доступны на запись:
 
 ```bash
@@ -95,7 +93,6 @@ journalctl -u roflan-leaderboard-bot -f
 - [ ] После `systemctl start` в `journalctl -u roflan-leaderboard-bot` есть блок `Permission audit` — все `OK`, нет `MISSING` (иначе донастроить роль бота на сервере)
 - [ ] Ручной пересчёт при необходимости: `sudo -u roflan-bot ./.venv/bin/python -m bot.cli run --year … --month …`
 - [ ] После успешного job — embed в `LEADERBOARD_CHANNEL_ID`
-- [ ] После перевыдачи роли — сообщение в `ROLE_NOTIFY_CHANNEL_ID` (или ошибка в `ROLE_ERROR_CHANNEL_ID`)
 
 ### 5. Миграция данных (если БД уже была на cron)
 

@@ -18,7 +18,6 @@ _GUILD_BASE = (
     ("read_message_history", "Read Message History"),
     ("send_messages", "Send Messages"),
 )
-_GUILD_MANAGE_ROLES = (("manage_roles", "Manage Roles"),)
 
 _CHANNEL_SCAN = (
     ("view_channel", "View Channel"),
@@ -43,17 +42,6 @@ class GuildAuditReport:
     @property
     def success(self) -> bool:
         return not self.issues
-
-
-def role_features_configured(settings: Settings) -> bool:
-    """True when role reassignment is enabled and env is fully set."""
-    if not settings.role_reassign_enabled:
-        return False
-    try:
-        settings.validate_role_settings()
-    except ValueError:
-        return False
-    return True
 
 
 def missing_permission_labels(
@@ -130,12 +118,7 @@ def channels_requiring_post_permissions(
     """Env label + channel id for startup send/embed permission checks."""
     candidates: list[tuple[str, int | None]] = [
         ("LEADERBOARD_CHANNEL_ID", settings.leaderboard_channel_id),
-        ("ROLE_NOTIFY_CHANNEL_ID", settings.role_notify_channel_id),
     ]
-    if role_features_configured(settings):
-        candidates.append(
-            ("ROLE_ERROR_CHANNEL_ID", settings.role_error_channel_id)
-        )
     return [(label, channel_id) for label, channel_id in candidates if channel_id is not None]
 
 
@@ -169,10 +152,7 @@ async def audit_guild_permissions(
         _log_report(report)
         return report
 
-    guild_required = _GUILD_BASE
-    if role_features_configured(settings):
-        guild_required = _GUILD_BASE + _GUILD_MANAGE_ROLES
-    _check_flags(member.guild_permissions, guild_required, "Guild", report)
+    _check_flags(member.guild_permissions, _GUILD_BASE, "Guild", report)
 
     seen_channels: set[int] = set()
     for channel_id in settings.stats_channel_ids:
@@ -204,31 +184,6 @@ async def audit_guild_permissions(
             report=report,
             require_text=True,
         )
-
-    if role_features_configured(settings):
-        rofler_id = settings.role_rofler_id
-        assert rofler_id is not None
-        target = guild.get_role(rofler_id)
-        if target is None:
-            try:
-                roles = await guild.fetch_roles()
-                target = discord.utils.get(roles, id=rofler_id)
-            except discord.HTTPException as exc:
-                report.issues.append(f"ROLE_ROFLER_ID: cannot fetch roles ({exc})")
-                target = None
-
-        if target is None:
-            report.issues.append(f"ROLE_ROFLER_ID: role {rofler_id} not found")
-        elif not member.top_role > target:
-            report.issues.append(
-                "Role hierarchy: bot role "
-                f"«{member.top_role.name}» must be **above** "
-                f"«{target.name}» (Manage Roles)"
-            )
-        else:
-            report.ok_messages.append(
-                f"Role hierarchy: «{member.top_role.name}» above «{target.name}»"
-            )
 
     _log_report(report)
     return report
@@ -274,7 +229,6 @@ def _log_report(report: GuildAuditReport) -> None:
         logger.info("Summary: all required permissions present.")
     else:
         logger.warning(
-            "Summary: %s issue(s) — fix Discord role permissions before "
-            "scan / embed / role reassignment.",
+            "Summary: %s issue(s) — fix Discord permissions before scan / embed.",
             len(report.issues),
         )

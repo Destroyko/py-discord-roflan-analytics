@@ -10,7 +10,6 @@ slash-команды и CLI (`verify`, `messages`, `channels-top`).
 - Application в [Discord Developer Portal](https://discord.com/developers/applications)
 - Инвайт бота: scopes `bot`, `applications.commands`
 - Права бота: View Channels, Read Message History, Send Messages, Embed Links
-- Для перевыдачи роли «Рофлер» (опционально): Manage Roles, роль бота **выше** «Рофлер»
 
 ## Установка
 
@@ -42,14 +41,14 @@ python -m bot.main
 | Когда | Что |
 |-------|-----|
 | Ежедневно (`DAILY_SYNC_HOUR`, по умолчанию 04:00 МСК) | Инкрементальное обновление **текущего** месяца в БД |
-| 1-го числа (`LEADERBOARD_MONTHLY_RUN_HOUR`, по умолчанию 10:00 МСК) | Полный пересчёт **предыдущего** месяца; embed в `LEADERBOARD_CHANNEL_ID` — **топ 5** по каналам `ROLE_DURKICHI_CHANNEL_ID` и `ROLE_ROFLINKICHI_CHANNEL_ID`; перевыдача роли — если `ROLE_REASSIGN_ENABLED=true` |
+| 1-го числа (`LEADERBOARD_MONTHLY_RUN_HOUR`, по умолчанию 10:00 МСК) | Полный пересчёт **предыдущего** месяца; embed в `LEADERBOARD_CHANNEL_ID` — **топ 5** по каналам `ROLE_DURKICHI_CHANNEL_ID` и `ROLE_ROFLINKICHI_CHANNEL_ID` |
 
 ### Slash-команды
 
 | Команда | Описание |
 |---------|----------|
-| `/show_leaderboard` | TOP **5** за месяц по **каналу** из SQLite (без скана); ответ только вам |
-| `/recalculate_leaderboard` | Полный скан месяца; доступ: Administrator или `MANUAL_RECALC_ROLE_IDS`; прогресс и итог — только вам (`post_results`, `assign_roles`, `resume`) |
+| `/show_leaderboard` | TOP по дурке и рофлинкам за месяц из SQLite (без скана, как в `LEADERBOARD_CHANNEL_ID`); ответ только вам |
+| `/recalculate_leaderboard` | Полный скан месяца; доступ: Administrator или `MANUAL_RECALC_ROLE_IDS`; прогресс и итог — только вам (`post_results`, `resume`) |
 
 При старте в лог пишется **permission audit** (какие права есть и чего не хватает).
 
@@ -81,18 +80,11 @@ python -m bot.cli channels-top --year 2026 --month 6
 - Daily sync: обновление известных постов по `message_id`, дописывание новых, удаление из БД если пост снят на сервере.
 - `reaction_count` — сумма реакций по эмодзи из `LEADERBOARD_EMOJIS` на сообщении.
 - `EXCLUDED_USER_IDS` — не сканируются и не в TOP.
+- `USER_CHECK_API_URL` — сторонняя проверка пользователя **на момент показа** TOP (публичный топ 3+2, `/show_leaderboard`); флаг не хранится и не режет сами данные, только вид списка (с подтягиванием следующего по рангу).
 
-`/recalculate_leaderboard` в ответе показывает **топ по дурке и рофлинкам** (как в `LEADERBOARD_CHANNEL_ID`); `/show_leaderboard` — TOP **по одному** каналу.
+`/recalculate_leaderboard` и `/show_leaderboard` показывают одинаковый **топ по дурке и рофлинкам** (как в `LEADERBOARD_CHANNEL_ID`); разница в том, что `/show_leaderboard` не сканирует Discord заново, а берёт то, что уже есть в SQLite.
 
-## Перевыдача роли «Рофлер» (опционально)
-
-`ROLE_REASSIGN_ENABLED=false` по умолчанию — статистика, embed с топом по двум каналам; роли вручную.
-
-При `ROLE_REASSIGN_ENABLED=true`:
-
-- TOP-3 в канале «дурка» + TOP-2 в «рофлинки» (без пересечения имён).
-- Снятие роли только с user id, сохранённых после прошлой успешной выдачи (**без** Server Members Intent).
-- **Первый прогон:** таблица держателей пуста — снимите роль вручную у лишних, затем запустите выдачу.
+Роль «Рофлер» бот **не выдаёт и не снимает сам** — только выводит топ 3+2 в embed; выдачу роли победителям делает администратор вручную.
 
 ## Переменные окружения
 
@@ -120,12 +112,13 @@ python -m bot.cli channels-top --year 2026 --month 6
 | `LEADERBOARD_MONTHLY_RUN_HOUR` / `MINUTE` | `10` / `0` | Monthly job, 1-е число |
 | `IGNORE_CHANNEL_IDS` | — | Исключить каналы из `STATS_CHANNEL_IDS` |
 | `EXCLUDED_USER_IDS` | — | Исключить пользователей из статистики |
+| `USER_CHECK_API_URL` | — | Скрывать пользователя из показанного TOP по внешнему API (см. выше) |
+| `USER_CHECK_API_TOKEN` | — | Bearer-токен для `USER_CHECK_API_URL` |
+| `USER_CHECK_API_TIMEOUT_SEC` | `5` | Таймаут одного запроса; при ошибке/таймауте считаем «не исключён» |
 
-### Каналы дурки/рофлинок и роли
+### Каналы дурки/рофлинок
 
-`ROLE_DURKICHI_CHANNEL_ID`, `ROLE_ROFLINKICHI_CHANNEL_ID` — оба в `STATS_CHANNEL_IDS`; нужны для embed в `LEADERBOARD_CHANNEL_ID` (топ `LEADERBOARD_CHANNEL_TOP_N` по каждому).
-
-При `ROLE_REASSIGN_ENABLED=true` дополнительно: `ROLE_ROFLER_ID`, `ROLE_NOTIFY_CHANNEL_ID`, `ROLE_ERROR_CHANNEL_ID`. Автовыдача: TOP-3 + TOP-2 без пересечения (`ROLE_DURKICHI_TOP_N`, `ROLE_ROFLINKICHI_TOP_N`).
+`ROLE_DURKICHI_CHANNEL_ID`, `ROLE_ROFLINKICHI_CHANNEL_ID` — оба в `STATS_CHANNEL_IDS`; нужны для embed в `LEADERBOARD_CHANNEL_ID` (топ `LEADERBOARD_CHANNEL_TOP_N` по каждому). Названия переменных исторические — сама роль «Рофлер» ботом не выдаётся.
 
 ### Тонкая настройка скана
 
@@ -138,7 +131,6 @@ python -m bot.cli channels-top --year 2026 --month 6
 | Обрыв сети / 429 при скане | Ретраи по каналу; gateway переподключается сам |
 | Падение mid-scan | `python -m bot.cli run … --resume` |
 | Monthly job не завершился | Алерт в `LEADERBOARD_CHANNEL_ID`; `--resume` |
-| Ошибка перевыдачи роли | Сообщение в `ROLE_ERROR_CHANNEL_ID` |
 
 Бот **не** продолжает прерванный скан после рестарта сам — нужен `--resume`.
 

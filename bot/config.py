@@ -19,14 +19,13 @@ DEFAULT_SCAN_PROGRESS_EVERY = 500
 DEFAULT_SCAN_CHECKPOINT_DIR = "./data"
 DEFAULT_SCAN_RETRY_MAX_ATTEMPTS = 5
 DEFAULT_SCAN_CHANNEL_DELAY_SEC = 0.5
-DEFAULT_ROLE_DURKICHI_TOP_N = 3
-DEFAULT_ROLE_ROFLINKICHI_TOP_N = 2
 DEFAULT_MONTHLY_RUN_HOUR = 10
 DEFAULT_MONTHLY_RUN_MINUTE = 0
 DEFAULT_DAILY_SYNC_HOUR = 4
 DEFAULT_DAILY_SYNC_MINUTE = 0
 DEFAULT_DAILY_SYNC_MESSAGE_DELAY_SEC = 0.05
 DEFAULT_DAILY_SYNC_FETCH_BATCH_SIZE = 25
+DEFAULT_USER_CHECK_API_TIMEOUT_SEC = 5.0
 
 
 @dataclass(frozen=True)
@@ -63,46 +62,11 @@ class Settings:
     scan_channel_delay_sec: float = DEFAULT_SCAN_CHANNEL_DELAY_SEC
     scan_strict_channels: bool = True
     excluded_user_ids: frozenset[str] = field(default_factory=frozenset)
-    role_rofler_id: int | None = None
-    role_notify_channel_id: int | None = None
-    role_error_channel_id: int | None = None
+    user_check_api_url: str | None = None
+    user_check_api_token: str | None = None
+    user_check_api_timeout_sec: float = DEFAULT_USER_CHECK_API_TIMEOUT_SEC
     role_durkichi_channel_id: int | None = None
-    role_durkichi_top_n: int = DEFAULT_ROLE_DURKICHI_TOP_N
     role_roflinkichi_channel_id: int | None = None
-    role_roflinkichi_top_n: int = DEFAULT_ROLE_ROFLINKICHI_TOP_N
-    role_reassign_enabled: bool = False
-
-    def validate_role_settings(self) -> None:
-        """Ensure role reassignment env is complete and consistent."""
-        if not self.role_reassign_enabled:
-            raise ValueError(
-                "Role reassignment is disabled (ROLE_REASSIGN_ENABLED=false)."
-            )
-        missing = [
-            name
-            for name, value in (
-                ("ROLE_ROFLER_ID", self.role_rofler_id),
-                ("ROLE_NOTIFY_CHANNEL_ID", self.role_notify_channel_id),
-                ("ROLE_ERROR_CHANNEL_ID", self.role_error_channel_id),
-                ("ROLE_DURKICHI_CHANNEL_ID", self.role_durkichi_channel_id),
-                ("ROLE_ROFLINKICHI_CHANNEL_ID", self.role_roflinkichi_channel_id),
-            )
-            if value is None
-        ]
-        if missing:
-            raise ValueError(
-                "Role reassignment requires: " + ", ".join(missing)
-            )
-        for channel_id, label in (
-            (self.role_durkichi_channel_id, "ROLE_DURKICHI_CHANNEL_ID"),
-            (self.role_roflinkichi_channel_id, "ROLE_ROFLINKICHI_CHANNEL_ID"),
-        ):
-            if channel_id not in self.stats_channel_ids:
-                raise ValueError(
-                    f"{label} ({channel_id}) must be listed in STATS_CHANNEL_IDS"
-                )
-        if self.role_durkichi_top_n < 1 or self.role_roflinkichi_top_n < 1:
-            raise ValueError("ROLE_*_TOP_N must be at least 1")
 
     def validate_leaderboard_post_channel_settings(self) -> None:
         """Ensure durkichi/roflinkichi channels are set for public TOP posts."""
@@ -301,19 +265,16 @@ def get_settings() -> Settings:
     if scan_channel_delay_sec < 0:
         raise ValueError("SCAN_CHANNEL_DELAY_SEC must be >= 0")
 
-    role_durkichi_top_n = int(
+    user_check_api_url = (os.getenv("USER_CHECK_API_URL") or "").strip() or None
+    user_check_api_token = (os.getenv("USER_CHECK_API_TOKEN") or "").strip() or None
+    user_check_api_timeout_sec = float(
         (
-            os.getenv("ROLE_DURKICHI_TOP_N")
-            or str(DEFAULT_ROLE_DURKICHI_TOP_N)
+            os.getenv("USER_CHECK_API_TIMEOUT_SEC")
+            or str(DEFAULT_USER_CHECK_API_TIMEOUT_SEC)
         ).strip()
     )
-    role_roflinkichi_top_n = int(
-        (
-            os.getenv("ROLE_ROFLINKICHI_TOP_N")
-            or str(DEFAULT_ROLE_ROFLINKICHI_TOP_N)
-        ).strip()
-    )
-    role_reassign_enabled = _parse_bool(os.getenv("ROLE_REASSIGN_ENABLED"), False)
+    if user_check_api_timeout_sec <= 0:
+        raise ValueError("USER_CHECK_API_TIMEOUT_SEC must be > 0")
 
     return Settings(
         discord_bot_token=token,
@@ -348,20 +309,13 @@ def get_settings() -> Settings:
         excluded_user_ids=frozenset(
             str(uid) for uid in _parse_id_list(os.getenv("EXCLUDED_USER_IDS"))
         ),
-        role_rofler_id=_parse_optional_int(os.getenv("ROLE_ROFLER_ID")),
-        role_notify_channel_id=_parse_optional_int(
-            os.getenv("ROLE_NOTIFY_CHANNEL_ID")
-        ),
-        role_error_channel_id=_parse_optional_int(
-            os.getenv("ROLE_ERROR_CHANNEL_ID")
-        ),
+        user_check_api_url=user_check_api_url,
+        user_check_api_token=user_check_api_token,
+        user_check_api_timeout_sec=user_check_api_timeout_sec,
         role_durkichi_channel_id=_parse_optional_int(
             os.getenv("ROLE_DURKICHI_CHANNEL_ID")
         ),
-        role_durkichi_top_n=role_durkichi_top_n,
         role_roflinkichi_channel_id=_parse_optional_int(
             os.getenv("ROLE_ROFLINKICHI_CHANNEL_ID")
         ),
-        role_roflinkichi_top_n=role_roflinkichi_top_n,
-        role_reassign_enabled=role_reassign_enabled,
     )

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from bot.config import Settings, get_settings
 from bot.database.db import Database
 from bot.services.leaderboard_service import LeaderboardEntry, format_emoji_label
+from bot.services.user_check_service import filter_flagged_entries
 from bot.utils.dates import (
     format_db_timestamp_local,
     local_timezone_short_label,
@@ -186,6 +187,9 @@ async def load_channel_leaderboard_for_period(
     """Load TOP-N for one stats channel and calendar month (no Discord scan).
 
     ``limit=None`` returns the full channel ranking (for skip-ahead winner picks).
+    When ``USER_CHECK_API_URL`` is configured and ``limit`` is given, users the
+    API flags are dropped and backfilled from the next ranks so the list stays
+    full (see ``bot.services.user_check_service``).
     """
     validate_period(year, month)
     settings = get_settings()
@@ -200,19 +204,26 @@ async def load_channel_leaderboard_for_period(
     after_db = to_db_timestamp(after_utc)
     before_db = to_db_timestamp(before_utc)
 
+    # Fetch a larger (unlimited) pool when the API filter needs room to
+    # backfill excluded ranks — a plain SQL LIMIT would cut those candidates
+    # before we know who gets flagged.
+    fetch_limit = None if (limit is not None and settings.user_check_api_url) else limit
     async with Database(settings.database_path) as db:
         rows = await db.get_leaderboard_for_channel(
             str(settings.guild_id),
             str(channel_id),
             after_db,
             before_db,
-            limit=limit,
+            limit=fetch_limit,
             excluded_user_ids=excluded_user_ids,
         )
-    return [
+    entries = [
         LeaderboardEntry(rank=index, author_id=author_id, total_reactions=total)
         for index, (author_id, total) in enumerate(rows, start=1)
     ]
+    if limit is None:
+        return entries
+    return await filter_flagged_entries(entries, limit=limit, settings=settings)
 
 
 async def load_channel_last_scanned_for_period(

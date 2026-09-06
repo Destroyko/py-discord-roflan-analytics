@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from bot.database.db import Database
+from bot.database.db import Database, MessageRow
 from bot.pipeline import PipelineResult, ScanFailedError
 from bot.services.leaderboard_service import LeaderboardEntry
 from bot.services.monthly_finalization import mark_period_attempted
@@ -255,7 +255,7 @@ async def test_recalculate_checkpoint_error_shown(cogmod, cog, monkeypatch):
     monkeypatch.setattr(cogmod, "BotChannelReader", MagicMock())
 
     await cog.recalculate_leaderboard.callback(
-        cog, interaction, 2026, 5, False, False, True
+        cog, interaction, 2026, 5, False, True
     )
 
     content = interaction.edit_original_response.await_args.kwargs.get("content") or (
@@ -324,6 +324,60 @@ async def test_recalculate_denies_without_role(cogmod, cog, monkeypatch):
     interaction.response.send_message.assert_awaited_once()
     assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
     interaction.response.defer.assert_not_awaited()
+
+
+async def test_show_leaderboard_covers_both_channels(cogmod, cog, env_settings):
+    """No `channel` argument: one embed with both Дуркичи and Рофлинкичи."""
+    interaction = _slash_interaction()
+    settings = env_settings
+
+    async with Database(settings.database_path) as db:
+        await db.init_db()
+        await db.upsert_messages(
+            [
+                MessageRow(
+                    message_id="d1",
+                    author_id="10",
+                    channel_id="111",
+                    guild_id="1000",
+                    created_at="2026-03-05 12:00:00",
+                    reaction_count=30,
+                    last_scanned_at="2026-03-05 12:00:00",
+                ),
+                MessageRow(
+                    message_id="r1",
+                    author_id="20",
+                    channel_id="222",
+                    guild_id="1000",
+                    created_at="2026-03-09 12:00:00",
+                    reaction_count=99,
+                    last_scanned_at="2026-03-09 12:00:00",
+                ),
+            ]
+        )
+
+    await cog.show_leaderboard.callback(cog, interaction, 2026, 3)
+
+    interaction.followup.send.assert_awaited_once()
+    embed = interaction.followup.send.await_args.kwargs["embed"]
+    assert "Дуркичи" in embed.description
+    assert "Рофлинкичи" in embed.description
+    assert "<@10>" in embed.description
+    assert "<@20>" in embed.description
+
+
+async def test_show_leaderboard_missing_channel_config(cogmod, env_settings):
+    """Without ROLE_DURKICHI/ROLE_ROFLINKICHI channel ids configured, bail clearly."""
+    interaction = _slash_interaction()
+    cog = cogmod.LeaderboardCog(bot=MagicMock())
+
+    await cog.show_leaderboard.callback(cog, interaction, 2026, 3)
+
+    interaction.followup.send.assert_awaited_once()
+    content = interaction.followup.send.await_args.kwargs.get("content") or (
+        interaction.followup.send.await_args.args[0]
+    )
+    assert "TOP недоступен" in content
 
 
 def test_can_recalculate_with_matching_role(cogmod, make_settings, monkeypatch):
