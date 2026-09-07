@@ -176,7 +176,7 @@ async def _classify_requested_period(year: int, month: int, settings) -> str:
 async def _build_show_leaderboard_reply(
     year: int, month: int, settings
 ) -> tuple[discord.Embed | None, str | None]:
-    """Shared by the slash and ``!`` versions of ``show_leaderboard``.
+    """Build the reply for ``/show_leaderboard``.
 
     Returns ``(embed, None)`` or ``(None, content)`` — exactly one is set.
     """
@@ -444,13 +444,13 @@ class LeaderboardCog(commands.Cog):
 
             return
 
-        await interaction.response.defer(ephemeral=False)
+        await interaction.response.defer(ephemeral=True)
 
         settings = get_settings()
 
         embed, content = await _build_show_leaderboard_reply(year, month, settings)
 
-        await interaction.followup.send(content=content, embed=embed, ephemeral=False)
+        await interaction.followup.send(content=content, embed=embed, ephemeral=True)
 
 
 

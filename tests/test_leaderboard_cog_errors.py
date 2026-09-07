@@ -359,9 +359,9 @@ async def test_show_leaderboard_covers_both_channels(cogmod, cog, env_settings):
 
     await cog.show_leaderboard.callback(cog, interaction, 2026, 3)
 
-    interaction.response.defer.assert_awaited_once_with(ephemeral=False)
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True)
     interaction.followup.send.assert_awaited_once()
-    assert interaction.followup.send.await_args.kwargs["ephemeral"] is False
+    assert interaction.followup.send.await_args.kwargs["ephemeral"] is True
     embed = interaction.followup.send.await_args.kwargs["embed"]
     assert "Дуркичи" in embed.description
     assert "Рофлинкичи" in embed.description
@@ -383,7 +383,7 @@ async def test_show_leaderboard_future_period_is_a_joke(cogmod, cog):
 
     interaction.followup.send.assert_awaited_once()
     embed = interaction.followup.send.await_args.kwargs["embed"]
-    assert interaction.followup.send.await_args.kwargs["ephemeral"] is False
+    assert interaction.followup.send.await_args.kwargs["ephemeral"] is True
     assert "будущее" in embed.description
 
 
@@ -398,7 +398,7 @@ async def test_show_leaderboard_too_old_period_is_a_joke(cogmod, cog, env_settin
 
     interaction.followup.send.assert_awaited_once()
     embed = interaction.followup.send.await_args.kwargs["embed"]
-    assert interaction.followup.send.await_args.kwargs["ephemeral"] is False
+    assert interaction.followup.send.await_args.kwargs["ephemeral"] is True
     assert "прошлое" in embed.description
 
 
